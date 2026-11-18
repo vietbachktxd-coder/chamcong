@@ -296,7 +296,9 @@ function punch(u, p, c, dev) {
   if (!sites.length) return { ok: false, error: 'Chưa khai báo địa điểm làm việc cho bạn' };
   const lat = +p.lat, lng = +p.lng, acc = Math.round(+p.accuracy || 9999);
   if (isNaN(lat) || isNaN(lng)) return { ok: false, error: 'Không có tọa độ GPS' };
-  let best = null; sites.forEach(s => { const d = dist(lat, lng, s.lat, s.lng); if (!best || d < best.d) best = { s, d }; });
+  let best = null; const pick = p.siteId ? sites.find(s => s.id === p.siteId) : null;
+  if (pick) best = { s: pick, d: dist(lat, lng, pick.lat, pick.lng) };
+  else sites.forEach(s => { const d = dist(lat, lng, s.lat, s.lng); if (!best || d < best.d) best = { s, d }; });
   const ssid = String(p.ssid || '').replace(/^"|"$/g, '').trim().toLowerCase(), bssid = String(p.bssid || '').trim().toLowerCase();
   const wifiSite = (ssid || bssid) ? sites.find(s => s.wifi.some(w => w && (w === ssid || w === bssid))) : null;
   const mode = String(c.wifiMode || 'OFF').toUpperCase();

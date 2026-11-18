@@ -202,6 +202,16 @@ public class Bridge {
     public void reload() { act.reload(); }
 
     @JavascriptInterface
+    public void share(String text) {
+        act.runOnUiThread(() -> {
+            try {
+                Intent i = new Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text);
+                act.startActivity(Intent.createChooser(i, "Chia sẻ qua"));
+            } catch (Exception ignored) { }
+        });
+    }
+
+    @JavascriptInterface
     @SuppressWarnings("deprecation")
     public void vibrate() {
         try {

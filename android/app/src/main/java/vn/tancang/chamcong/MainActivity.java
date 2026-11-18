@@ -47,6 +47,8 @@ public class MainActivity extends Activity {
         s.setMediaPlaybackRequiresUserGesture(false);
         s.setAllowFileAccess(false);
         s.setCacheMode(WebSettings.LOAD_DEFAULT);
+        int zoom = Math.round(getResources().getConfiguration().fontScale * 100);
+        s.setTextZoom(Math.max(85, Math.min(zoom, 110)));
         s.setUserAgentString(s.getUserAgentString() + " ChamCongApp/" + BuildConfig.VERSION_NAME);
 
         bridge = new Bridge(this, web);
