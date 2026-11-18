@@ -19,6 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       vname: ${{ steps.ver.outputs.vname }}
+      signed: ${{ steps.key.outputs.ok }}
     steps:
       - uses: actions/checkout@v4
 
@@ -39,13 +40,21 @@ jobs:
           gradle-version: '8.9'
 
       - name: Signing key
+        id: key
         env:
           KS_PASS: ${{ secrets.KS_PASS }}
         run: |
-          if [ -z "$KS_PASS" ]; then echo "::error::Chưa khai báo secret KS_PASS (Settings > Secrets and variables > Actions)"; exit 1; fi
+          if [ -z "$KS_PASS" ]; then echo "::warning::Chưa có secret KS_PASS - chỉ build thử (debug), không phát hành"; echo "ok=false" >> $GITHUB_OUTPUT; exit 0; fi
+          echo "ok=true" >> $GITHUB_OUTPUT
           openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in android/app/release.keystore.enc -out android/app/release.keystore -pass env:KS_PASS
 
+      - name: Build thử (chưa có khóa ký)
+        if: steps.key.outputs.ok != 'true'
+        working-directory: android
+        run: gradle --no-daemon assembleDebug -PWEB_URL="${{ steps.ver.outputs.weburl }}"
+
       - name: Build APK
+        if: steps.key.outputs.ok == 'true'
         working-directory: android
         env:
           KS_PASS: ${{ secrets.KS_PASS }}
@@ -56,6 +65,7 @@ jobs:
             -PVNAME="${{ steps.ver.outputs.vname }}"
 
       - name: Prepare site
+        if: steps.key.outputs.ok == 'true'
         env:
           MSG: ${{ github.event.head_commit.message }}
           VCODE: ${{ steps.ver.outputs.vcode }}
@@ -75,6 +85,7 @@ jobs:
           cat site/app-version.json
 
       - name: GitHub Release
+        if: steps.key.outputs.ok == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           MSG: ${{ github.event.head_commit.message }}
@@ -82,12 +93,14 @@ jobs:
           gh release create "v${{ steps.ver.outputs.vname }}" site/download/ChamCong.apk \
             --title "Chấm công TCL ${{ steps.ver.outputs.vname }}" --notes "${MSG:-Cập nhật}" || true
 
-      - uses: actions/upload-pages-artifact@v3
+      - if: steps.key.outputs.ok == 'true'
+        uses: actions/upload-pages-artifact@v3
         with:
           path: site
 
   deploy:
     needs: build
+    if: needs.build.outputs.signed == 'true'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
