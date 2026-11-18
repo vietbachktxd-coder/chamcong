@@ -30,7 +30,9 @@ const LEAVE_TYPES = ['P', 'O', 'KL', 'CT'];
 
 /* ============================ TIỆN ÍCH SHEET ============================ */
 let MEMO = {};
-function book() { return SpreadsheetApp.getActiveSpreadsheet(); }
+const SHEET_ID = '1Eqh0OJLG_NAls0aqPVE8gHilba8QVqbnkYEqMiKsA_E'; // Google Sheet ChamCong_TCL_Data
+let BOOK = null;
+function book() { return BOOK || (BOOK = SHEET_ID ? SpreadsheetApp.openById(SHEET_ID) : SpreadsheetApp.getActiveSpreadsheet()); }
 function sh(k) {
   let s = book().getSheetByName(NAME[k]);
   if (!s) {
