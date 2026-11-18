@@ -221,8 +221,9 @@ function viewLogin(msg) {
     const r = await call('login', { id: $('#lgId').value.trim(), password: $('#lgPw').value, deviceId: S.device }, { noLogout: true }); busy(b, 0);
     if (!r.ok) return viewLogin(r.error);
     S.token = r.token; LS.set('token', r.token); LS.set('lastId', $('#lgId').value.trim().toUpperCase());
+    if (r.me && r.me.ok) { S.data.me = r.me; LS.set('me', r.me); }
     LS.set('remember', $('#lgRm').checked); if ($('#lgRm').checked) CRED.set({ id: $('#lgId').value.trim().toUpperCase(), pw: $('#lgPw').value }); else CRED.del();
-    await loadMe(); pollNotifs(); if (r.mustChange) changePw(true);
+    if (r.me && r.me.ok) { if (r.me.notifs) S.notifs = r.me.notifs; render(); } else await loadMe(); if (r.mustChange) changePw(true);
   };
   $('#lgGo').onclick = go; $('#lgPw').onkeydown = e => { if (e.key === 'Enter') go(); };
   $('#lgReg').onclick = registerForm;
