@@ -113,9 +113,10 @@ function freshPos() {
 }
 function nearest() {
   const sites = (S.data.me && S.data.me.sites) || []; if (!S.pos || !sites.length) return null;
+  const sel = sites.find(x => x.id === LS.get('siteSel', '')); if (sel) return { s: sel, d: dist(S.pos.lat, S.pos.lng, sel.lat, sel.lng) };
   let b = null; sites.forEach(s => { const d = dist(S.pos.lat, S.pos.lng, s.lat, s.lng); if (!b || d < b.d) b = { s, d }; }); return b;
 }
-let MYMARK = null;
+let MYMARK = null, MYDOT = null, HMAP = null;
 function wifiNow() { if (!NATIVE) return {}; try { return JSON.parse(Native.wifi()); } catch (e) { return {}; } }
 function sitesWifi() { return ((S.data.me && S.data.me.sites) || []).flatMap(s => s.wifi || []); }
 function updateGeo() {
@@ -130,7 +131,9 @@ function updateGeo() {
   const w = wifiNow(), wOk = !!w.ssid && sitesWifi().some(x => x === w.ssid.toLowerCase() || x === (w.bssid || '').toLowerCase());
   el.innerHTML = `${inside ? '✅ Bạn đang <b>trong vùng</b>' : '⚠️ Bạn đang <b>ngoài vùng</b>'} ${esc(n.s.name)} · cách ${Math.round(n.d)} m (cho phép ${n.s.radius} m)<br>Độ chính xác GPS: ±${Math.round(S.pos.acc)} m${accOk ? '' : ' — <b>chưa đạt</b> (cần ≤ ' + maxAcc + ' m), hãy ra chỗ thoáng'}${NATIVE ? `<br>📶 Wi-Fi: ${w.ssid ? esc(w.ssid) + (wOk ? ' ✅ của công ty' : '') : 'không kết nối'}` : ''}`;
   if (!inside && wOk && String(S.data.me.cfg.wifiMode) === 'GPS_OR_WIFI') el.className = 'st ok';
-  if (MYMARK) MYMARK.setLatLng([S.pos.lat, S.pos.lng]).setRadius(Math.max(5, S.pos.acc));
+  if (MYMARK) { MYMARK.setLatLng([S.pos.lat, S.pos.lng]).setRadius(Math.max(5, S.pos.acc)); MYDOT.setLatLng([S.pos.lat, S.pos.lng]);
+    if (!S.mapCentered && HMAP) { HMAP.setView([S.pos.lat, S.pos.lng], 17); S.mapCentered = true; } }
+  const co = $('#coord'); if (co) co.innerHTML = `📍 <b>${S.pos.lat.toFixed(6)}, ${S.pos.lng.toFixed(6)}</b> · ±${Math.round(S.pos.acc)} m · <a href="https://maps.google.com/?q=${S.pos.lat},${S.pos.lng}" target="_blank">Google Maps</a>`;
 }
 
 /* ---------------- Camera selfie ---------------- */
@@ -280,24 +283,46 @@ function mkMap(id, lat, lng, z) {
 function vHome() {
   const m = S.data.me, sh = m.shift || {}, n = now(), logs = (m.today || []).filter(l => l.valid === 'TRUE').sort((a, b) => a.time < b.time ? -1 : 1);
   const pend = queue(), last = pend.length ? pend[pend.length - 1].type : (logs.length ? logs[logs.length - 1].type : '');
-  const next = last === 'IN' ? 'OUT' : 'IN';
+  const next = last === 'IN' ? 'OUT' : 'IN', sel = LS.get('siteSel', ''), ad = m.me.role === 'AD';
   const hol = (m.holidays || []).find(h => h.date === ymd(n));
   $('#view').innerHTML = `<div class="hero"><div class="clock" id="clock">--:--:--</div><div class="date">${WD[n.getDay()]}, ${vnDate(ymd(n))}${hol ? ' · 🎉 ' + esc(hol.name) : ''}</div>
-    <div class="shift"><span>Ca: <b>${esc(sh.name || '')}</b></span><span>Vào ${esc(sh.start || '')} · Ra ${esc(sh.end || '')}</span></div></div>
-    <div class="card"><div id="geo" class="st in">Đang xác định vị trí…</div>
+    <div class="shift"><span>Ca <b>${esc(sh.name || '')}</b></span><span>${esc(sh.start || '')} – ${esc(sh.end || '')}</span></div></div>
+    <div class="card">
+      ${m.sites.length > 1 ? `<label>Nơi làm việc hôm nay</label><select id="siteSel"><option value="">📍 Tự chọn nơi gần nhất</option>${m.sites.map(x => `<option value="${esc(x.id)}" ${x.id === sel ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>` : ''}
+      <div id="geo" class="st in">Đang xác định vị trí…</div>
       <div class="punch"><button class="btn g ${next === 'IN' ? '' : 'dim'}" id="pIn">▶ VÀO CA<small>Check-in</small></button><button class="btn r ${next === 'OUT' ? '' : 'dim'}" id="pOut">■ RA CA<small>Check-out</small></button></div>
-      <div id="pMsg"></div><div class="map" id="hmap"></div></div>
-    <div class="card"><h3>Hôm nay</h3>${logs.length || pend.length ? `<ul class="tl">${logs.map(l => `<li><span class="dot ${l.type === 'IN' ? 'in' : 'out'}"></span><b>${l.time.slice(11, 16)}</b><span>${l.type === 'IN' ? 'Check-in' : 'Check-out'} · ${esc(l.siteName)}${l.source === 'CT' ? ' · Công tác' : ''}${l.offline === 'TRUE' ? ' · ngoại tuyến' : ''}</span></li>`).join('')}
-      ${pend.map(p => `<li><span class="dot ${p.type === 'IN' ? 'in' : 'out'}"></span><b>${new Date(p.clientTime).toTimeString().slice(0, 5)}</b><span>${p.type === 'IN' ? 'Check-in' : 'Check-out'} · ⏳ chờ đồng bộ</span></li>`).join('')}</ul>` : '<p class="muted">Chưa chấm công hôm nay.</p>'}</div>
+      <div id="pMsg"></div>
+      <div class="mapbox"><div class="map" id="hmap"></div><button class="mapbtn" id="mMe" title="Về vị trí của tôi">◎</button></div>
+      <div class="coord" id="coord">📍 Đang lấy tọa độ…</div>
+      ${ad ? '<button class="btn o sm full" id="mAddSite" style="margin-top:8px">＋ Lưu vị trí hiện tại thành nơi làm việc</button>' : ''}
+      ${!m.sites.length ? `<div class="st wa">Chưa có nơi làm việc nào. ${ad ? 'Bấm nút trên khi đang đứng tại công ty để tạo.' : 'Liên hệ quản trị để được gắn nơi làm việc.'}</div>` : ''}
+    </div>
+    <div class="card"><h3>Hôm nay</h3>${logs.length || pend.length ? `<ul class="tl">${logs.map(l => `<li><span class="dot ${l.type === 'IN' ? 'in' : 'out'}"></span><b>${l.time.slice(11, 16)}</b><span>${l.type === 'IN' ? 'Vào ca' : 'Ra ca'} · ${esc(l.siteName)}${l.source === 'CT' ? ' · Công tác' : ''}${l.offline === 'TRUE' ? ' · ngoại tuyến' : ''}</span></li>`).join('')}
+      ${pend.map(p => `<li><span class="dot ${p.type === 'IN' ? 'in' : 'out'}"></span><b>${new Date(p.clientTime).toTimeString().slice(0, 5)}</b><span>${p.type === 'IN' ? 'Vào ca' : 'Ra ca'} · ⏳ chờ đồng bộ</span></li>`).join('')}</ul>` : '<p class="muted">Chưa chấm công hôm nay.</p>'}</div>
     <div class="card"><h3>Phép năm ${n.getFullYear()}</h3><div class="kv"><span>Được hưởng</span><b>${m.balance.quota} ngày</b><span>Đã dùng</span><b>${m.balance.used} ngày</b><span>Còn lại</span><b style="color:var(--g)">${m.balance.left} ngày</b></div></div>`;
   $('#pIn').onclick = () => doPunch('IN'); $('#pOut').onclick = () => doPunch('OUT');
+  if ($('#siteSel')) $('#siteSel').onchange = e => { LS.set('siteSel', e.target.value); updateGeo(); drawSites(); const x = m.sites.find(z => z.id === e.target.value); if (x && HMAP) HMAP.setView([x.lat, x.lng], 16); };
+  if ($('#mAddSite')) $('#mAddSite').onclick = async () => { const p = await freshPos(); if (!p) return toast('Chưa lấy được vị trí', 'er'); siteForm({ lat: p.lat.toFixed(6), lng: p.lng.toFixed(6), radius: 200 }); };
   startGPS(); updateGeo();
-  const c = (m.sites[0]) || (S.pos ? { lat: S.pos.lat, lng: S.pos.lng } : null);
-  if (c) setTimeout(() => {
-    const mp = mkMap('hmap', S.pos ? S.pos.lat : c.lat, S.pos ? S.pos.lng : c.lng, 16); if (!mp) return;
-    m.sites.forEach(s => L.circle([s.lat, s.lng], { radius: s.radius, color: '#0b5cad', weight: 2, fillOpacity: .12 }).addTo(mp).bindTooltip(s.name));
-    MYMARK = L.circle(S.pos ? [S.pos.lat, S.pos.lng] : [c.lat, c.lng], { radius: S.pos ? Math.max(5, S.pos.acc) : 5, color: '#16a34a', fillColor: '#16a34a', fillOpacity: .5, weight: 2 }).addTo(mp);
-  }, 50); else $('#hmap').classList.add('hide');
+  S.mapCentered = !!S.pos;
+  setTimeout(() => {
+    const ss = m.sites.find(x => x.id === sel) || m.sites[0], c = S.pos || ss || { lat: 10.7626, lng: 106.6602 };
+    HMAP = mkMap('hmap', c.lat, c.lng, S.pos || ss ? 16 : 11); if (!HMAP) return;
+    drawSites();
+    const p0 = S.pos ? [S.pos.lat, S.pos.lng] : [c.lat, c.lng];
+    MYMARK = L.circle(p0, { radius: S.pos ? Math.max(5, S.pos.acc) : 5, color: '#16a34a', fillColor: '#16a34a', fillOpacity: .15, weight: 1 }).addTo(HMAP);
+    MYDOT = L.circleMarker(p0, { radius: 7, color: '#fff', weight: 3, fillColor: '#16a34a', fillOpacity: 1 }).addTo(HMAP).bindTooltip('Bạn ở đây');
+    $('#mMe').onclick = () => { if (S.pos) HMAP.setView([S.pos.lat, S.pos.lng], 17); };
+    updateGeo();
+  }, 50);
+}
+let SITELAYER = null;
+function drawSites() {
+  if (!HMAP || !window.L) return; if (SITELAYER) SITELAYER.remove(); SITELAYER = L.layerGroup().addTo(HMAP);
+  const n = nearest(), act = n ? n.s.id : LS.get('siteSel', '');
+  (S.data.me.sites || []).forEach(x => { const on = x.id === act;
+    L.circle([x.lat, x.lng], { radius: x.radius, color: on ? '#16a34a' : '#0b5cad', weight: on ? 3 : 2, fillOpacity: on ? .15 : .08 }).addTo(SITELAYER);
+    L.marker([x.lat, x.lng]).addTo(SITELAYER).bindTooltip(x.name, { permanent: on, direction: 'top' }); });
 }
 async function doPunch(type) {
   if (S.punching) return; S.punching = true;
@@ -317,7 +342,7 @@ async function doPunch(type) {
     }
     const w = wifiNow();
     const p = { type, lat: pos.lat, lng: pos.lng, accuracy: pos.acc, photo, cid: 'C' + uuid(), clientTime: now().toISOString(), ua: NATIVE ? 'App ' + NATIVE.versionName + ' ' + NATIVE.model : navigator.userAgent.slice(0, 80),
-      client: NATIVE ? 'android' : 'web', mock: !!pos.mock, ssid: w.ssid || '', bssid: w.bssid || '' };
+      client: NATIVE ? 'android' : 'web', mock: !!pos.mock, ssid: w.ssid || '', bssid: w.bssid || '', siteId: LS.get('siteSel', '') };
     msg('<div class="st in">Đang gửi lên máy chủ…</div>');
     const r = navigator.onLine ? await call('punch', p) : { ok: false, net: true };
     if (r.net) {
@@ -590,9 +615,12 @@ function vAcc() {
    <span>Ca làm</span><b>${esc(S.data.me.shift.name)} (${S.data.me.shift.start}-${S.data.me.shift.end})</b><span>Email</span><b>${esc(m.email) || '—'}</b></div></div>
    <div class="card"><button class="btn s full" id="aPw">🔑 Đổi mật khẩu</button>${!isStandalone() ? '<button class="btn o full" data-x="install" style="margin-top:8px">📲 Cài ứng dụng lên điện thoại</button>' : ''}
    ${NATIVE ? `<label style="display:flex;gap:8px;align-items:center;color:var(--t);font-size:14px;margin-top:12px"><input type="checkbox" id="aRem" style="width:auto" ${LS.get('remOn', true) ? 'checked' : ''}> Nhắc giờ vào/ra ca trên điện thoại</label>` : (isAndroid ? '<a class="btn g full" href="download/" style="margin-top:8px;text-decoration:none">⬇ Tải ứng dụng Android (.apk)</a>' : '')}
+   <button class="btn s full" id="aShare" style="margin-top:8px">📤 Gửi link cài app cho đồng nghiệp</button>
    <button class="btn s full" id="aUp" style="margin-top:8px">🔄 Kiểm tra bản cập nhật</button><button class="btn r full" id="aOut" style="margin-top:8px">Đăng xuất</button></div>
    <p class="muted c">Chấm công GPS · giao diện ${VERSION}${NATIVE ? ' · ứng dụng ' + esc(NATIVE.versionName) : ''} · máy chủ ${esc(S.data.me.backend)}<br>Mã thiết bị: ${esc(S.device.slice(0, 10))}</p>`;
   $('#aPw').onclick = () => changePw(false);
+  $('#aShare').onclick = () => { const link = location.origin + location.pathname.replace(/[^/]*$/, '') + 'download/', t = 'Cài ứng dụng Chấm công TCL: ' + link;
+    if (NATIVE && Native.share) Native.share(t); else if (navigator.share) navigator.share({ text: t }).catch(() => {}); else navigator.clipboard.writeText(t).then(() => toast('Đã chép link: ' + link, 'ok')); };
   if ($('#aRem')) $('#aRem').onchange = e => { LS.set('remOn', e.target.checked); nativeSync(); toast(e.target.checked ? 'Đã bật nhắc giờ ca' : 'Đã tắt nhắc giờ ca'); }; $('#aUp').onclick = () => checkUpdate('manual');
   $('#aOut').onclick = () => confirmBox(queue().length ? 'Còn lượt chấm công chưa đồng bộ, đăng xuất sẽ mất dữ liệu này. Vẫn đăng xuất?' : 'Đăng xuất khỏi ứng dụng?', () => { LS.del('queue'); logout(); });
 }
