@@ -1,6 +1,6 @@
 importScripts('version.js');
 const CACHE = 'chamcong-' + self.APP_VERSION;
-const SHELL = ['./', 'index.html', 'app.css', 'app.js', 'config.js', 'version.js', 'manifest.webmanifest',
+const SHELL = ['./', 'index.html', 'app.css', 'app.js', 'demo-backend.js', 'config.js', 'version.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png', 'icons/apple-180.png'];
 const CDN = /unpkg\.com|cdnjs\.cloudflare\.com/;
 self.addEventListener('install', e => e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL.map(u => new Request(u, { cache: 'reload' }))))));

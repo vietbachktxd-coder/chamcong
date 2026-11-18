@@ -76,6 +76,7 @@ jobs:
           VCODE: ${{ steps.ver.outputs.vcode }}
           VNAME: ${{ steps.ver.outputs.vname }}
         run: |
+          node tools/build-demo.js
           mkdir -p site
           cp -r web/* site/
           mkdir -p site/download

@@ -32,8 +32,15 @@ function confirmBox(msg, ok) { modal(`<h3>Xác nhận</h3><p>${esc(msg)}</p><div
 const busy = (btn, on) => { if (!btn) return; if (on) { btn.dataset.t = btn.innerHTML; btn.innerHTML = '<span class="spin"></span>'; btn.disabled = true; } else { btn.innerHTML = btn.dataset.t || btn.innerHTML; btn.disabled = false; } };
 
 /* ---------------- API ---------------- */
+const isDemo = () => !S.api || /DAN_URL/.test(S.api);
 async function call(action, data = {}, opt = {}) {
-  if (!S.api || /DAN_URL/.test(S.api)) return { ok: false, error: 'Chưa cấu hình địa chỉ máy chủ (config.js)' };
+  if (isDemo()) {
+    if (!window.ChamCongDemo) return { ok: false, error: 'Chưa cấu hình địa chỉ máy chủ' };
+    await new Promise(r => setTimeout(r, 120));
+    const j = ChamCongDemo.api({ action, token: S.token, appVersion: VERSION, ...data });
+    if (j.code === 'AUTH' && !opt.noLogout) { toast(j.error, 'er'); logout(true); }
+    return j;
+  }
   try {
     const r = await fetch(S.api, { method: 'POST', body: JSON.stringify({ action, token: S.token, appVersion: VERSION, ...data }), redirect: 'follow' });
     const j = await r.json();
@@ -177,6 +184,7 @@ function viewLogin(msg) {
   <div class="card"><label>Mã nhân viên</label><input id="lgId" autocapitalize="characters" autocomplete="username" value="${esc(LS.get('lastId', ''))}">
   <label>Mật khẩu</label><input id="lgPw" type="password" autocomplete="current-password">
   <button class="btn full" style="margin-top:14px" id="lgGo">Đăng nhập</button>${msg ? `<div class="st er">${esc(msg)}</div>` : ''}
+  ${isDemo() ? '<div class="st wa">🧪 <b>Chế độ dùng thử</b> (chưa có máy chủ): dữ liệu chỉ lưu trên máy này. Đăng nhập lần đầu: <b>ADMIN</b> / <b>admin123</b></div>' : ''}
   <details style="margin-top:12px"><summary class="muted">Cài đặt máy chủ</summary><label>URL Apps Script (/exec)</label><input id="lgApi" value="${esc(LS.get('api', ''))}" placeholder="Để trống = dùng mặc định trong config.js"></details></div>
   ${!isStandalone() ? '<button class="btn o full" data-x="install">📲 Cài ứng dụng lên điện thoại</button>' : ''}</div>`;
   const go = async () => {
@@ -214,7 +222,7 @@ function nativeSync() {
   if (!NATIVE || !S.data.me) return; const m = S.data.me, sh = m.shift || {};
   const logs = (m.today || []).filter(l => l.valid === 'TRUE').sort((a, b) => a.time < b.time ? -1 : 1);
   try {
-    Native.setSession(S.api, S.token, JSON.stringify({ name: sh.name || '', start: sh.start || '07:30', end: sh.end || '17:00', workDays: m.me.workDays || '1,2,3,4,5,6',
+    Native.setSession(isDemo() ? '' : S.api, S.token, JSON.stringify({ name: sh.name || '', start: sh.start || '07:30', end: sh.end || '17:00', workDays: m.me.workDays || '1,2,3,4,5,6',
       holidays: (m.holidays || []).map(h => h.date), before: 10, after: 5, enabled: LS.get('remOn', true) }));
     Native.setToday(ymd(now()), logs.length ? logs[logs.length - 1].type : '');
   } catch (e) { console.warn(e); }
@@ -249,6 +257,7 @@ function render() {
   $('#app').innerHTML = `<header class="top"><h1>${esc(m.cfg.company || 'Chấm công GPS')}<small>${esc(m.me.name)} · ${ROLE[m.me.role] || ''} · ${esc(m.me.dept || '')}</small></h1>
     <button class="hbtn" id="bell" data-x="notifs" style="position:relative">🔔<b class="badge ${S.unread ? '' : 'hide'}" style="top:-4px;right:-4px">${S.unread || ''}</b></button>
     ${!isStandalone() ? '<button class="hbtn" data-x="install">📲 Cài app</button>' : ''}</header>
+    ${isDemo() ? '<div class="banner">🧪 <span><b>Chế độ dùng thử</b>: dữ liệu chỉ lưu trên máy này, chưa dùng chung. Sẽ tự chuyển sang dùng chung khi có máy chủ.</span></div>' : ''}
     ${!navigator.onLine ? '<div class="banner">📴 Đang ngoại tuyến — chấm công sẽ được lưu tạm và tự đồng bộ khi có mạng.</div>' : ''}
     ${q ? `<div class="banner">⏳ ${q} lượt chấm công chờ đồng bộ <button class="btn sm y" data-x="sync">Đồng bộ ngay</button></div>` : ''}
     <main id="view"></main>
