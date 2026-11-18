@@ -36,7 +36,27 @@ const busy = (btn, on) => { if (!btn) return; if (on) { btn.dataset.t = btn.inne
 
 /* ---------------- API ---------------- */
 const isDemo = () => !S.api || /DAN_URL/.test(S.api);
+const callV = (a, d) => call(a, d, { view: S.view });
+const READ = new Set(['myMonth', 'myRequests', 'dashboard', 'pending', 'employees', 'timesheet', 'logs', 'schedule', 'evaluation', 'ratings', 'payslips', 'getCfg', 'directory', 'myPayslip', 'notifs']);
+const RC = {}, INFL = {};
+function rcKey(a, d) { return a + '|' + JSON.stringify(d || {}); }
 async function call(action, data = {}, opt = {}) {
+  if (READ.has(action) && !opt.fresh && !isDemo()) {
+    const k = rcKey(action, data), hit = RC[k] || (LS.get('rc', {})[k]);
+    const refresh = () => INFL[k] || (INFL[k] = rawCall(action, data, opt).then(j => { delete INFL[k];
+      if (j && j.ok) { const changed = JSON.stringify(j) !== JSON.stringify(RC[k] || hit); RC[k] = j; saveRC(k, j); if (hit && changed && opt.view === S.view) { S.rerender = true; rerender(); } }
+      return j; }));
+    if (hit && hit.ok) { RC[k] = hit; refresh(); return hit; }
+    return refresh();
+  }
+  const j = await rawCall(action, data, opt);
+  if (!READ.has(action) && j && j.ok && action !== 'me' && action !== 'login') { for (const k in RC) delete RC[k]; LS.set('rc', {}); }
+  return j;
+}
+function saveRC(k, j) { if (/payslips|myPayslip|timesheet|logs/.test(k)) return; try { const all = LS.get('rc', {}); all[k] = j; const ks = Object.keys(all); if (ks.length > 30) delete all[ks[0]]; LS.set('rc', all); } catch (e) { } }
+let RRT = null;
+function rerender() { clearTimeout(RRT); RRT = setTimeout(() => { if ($('#modal').classList.contains('hide') && !S.punching && !document.activeElement.matches('input,textarea,select')) render(); }, 300); }
+async function rawCall(action, data = {}, opt = {}) {
   if (isDemo()) {
     if (!window.ChamCongDemo) return { ok: false, error: 'Chưa cấu hình địa chỉ máy chủ' };
     await new Promise(r => setTimeout(r, 120));
@@ -244,6 +264,9 @@ function changePw(forced) {
 /* ---------------- Dữ liệu chính ---------------- */
 async function loadMe() {
   const r = await call('me');
+  if (r.ok && r.notifs) { S.notifs = r.notifs; const seen = LS.get('nSeen', ''); S.unread = r.notifs.filter(n => n.time > seen).length; }
+  const sig = x => JSON.stringify(Object.assign({}, x, { serverTime: 0, notifs: 0 }));
+  if (r.ok && S.data.me && sig(r) === sig(S.data.me)) { S.data.me.serverTime = r.serverTime; return; }
   if (r.ok) { S.data.me = r; LS.set('me', r); const st = new Date(r.serverTime.replace(' ', 'T')); if (!isNaN(st)) S.offset = st - Date.now(); nativeSync(); }
   else if (r.net && LS.get('me')) S.data.me = LS.get('me');
   else if (!r.ok && r.code !== 'AUTH') { if (!S.data.me) { viewLogin(r.error); return; } toast(r.error, 'er'); }
@@ -275,26 +298,36 @@ function showNotifs() {
 setInterval(() => { if (document.visibilityState === 'visible') pollNotifs(); }, 120e3);
 window.__nativeOpen = k => { if (k === 'notifs') pollNotifs(true); };
 window.__nativeResume = () => { if (S.token) { loadMe(); syncQueue(); } };
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.token) { loadMe(); syncQueue(); } });
+setInterval(() => { if (document.visibilityState === 'visible' && S.token && !S.punching) loadMe(); }, 60e3);
 window.__nativeBack = () => { if (!$('#modal').classList.contains('hide')) { closeModal(); return 'handled'; } if (S.token && S.tab !== 'home') { S.tab = 'home'; render(); return 'handled'; } return 'exit'; };
 window.__nativeUpdating = v => toast('Đang tải và cài bản ' + v + '…');
 /* ---------------- Khung ứng dụng ---------------- */
+const svg = d => `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+const IC = { clock: svg('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'), cal: svg('<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>'),
+  doc: svg('<path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5M10 13h6M10 17h6"/>'), chart: svg('<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>'),
+  gear: svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>'),
+  user: svg('<circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/>'), bell: svg('<path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.9 1.9 0 0 0 3.4 0"/>') };
+const initials = n => String(n || '?').trim().split(/\s+/).slice(-2).map(x => x[0]).join('').toUpperCase();
 function tabs() {
   const m = S.data.me.me, mg = m.role === 'QL' || m.role === 'AD';
-  return [['home', '⏱', 'Chấm công'], ['month', '📅', 'Bảng công'], ['req', '📝', 'Đơn từ'], ...(mg ? [['mgr', '📊', 'Quản lý']] : []), ['acc', '👤', 'Tài khoản']];
+  return [['home', IC.clock, 'Chấm công'], ['month', IC.cal, 'Bảng công'], ['req', IC.doc, 'Đơn từ'], ...(mg ? [['mgr', IC.chart, 'Quản lý']] : []), ...(m.role === 'AD' ? [['set', IC.gear, 'Cài đặt']] : [['acc', IC.user, 'Tài khoản']])];
 }
 function render() {
   if (!S.token) { if (!$('#lgId')) viewLogin(); return; } if (!S.data.me) return;
+  S.view = S.tab + ':' + (S.tab === 'mgr' ? (S.sub.mgr || 'dash') : S.tab === 'set' ? (S.sub.set || 'org') : '');
   S.maps.forEach(m => { try { m.remove(); } catch (e) {} }); S.maps = []; MYMARK = null;
   const m = S.data.me, q = queue().length;
-  $('#app').innerHTML = `<header class="top"><h1>${esc(m.cfg.company || 'Chấm công GPS')}<small>${esc(m.me.name)} · ${ROLE[m.me.role] || ''} · ${esc(m.me.dept || '')}</small></h1>
-    <button class="hbtn" id="bell" data-x="notifs" style="position:relative">🔔<b class="badge ${S.unread ? '' : 'hide'}" style="top:-4px;right:-4px">${S.unread || ''}</b></button>
-    ${!isStandalone() ? '<button class="hbtn" data-x="install">📲 Cài app</button>' : ''}</header>
+  $('#app').innerHTML = `<header class="top"><div class="brand"><b>${esc(m.cfg.company || 'Chấm công')}</b><small>${esc(m.cfg.unit || '')}${m.cfg.unit ? ' · ' : ''}${esc(m.me.name)}</small></div>
+    ${!isStandalone() ? '<button class="hbtn" data-x="install" title="Cài ứng dụng">⤓</button>' : ''}
+    <button class="hbtn" id="bell" data-x="notifs" title="Thông báo">${IC.bell}<b class="badge ${S.unread ? '' : 'hide'}">${S.unread || ''}</b></button>
+    <button class="avatar" data-tab="acc" title="Tài khoản">${esc(initials(m.me.name))}</button></header>
     ${isDemo() ? '<div class="banner">🧪 <span><b>Chế độ dùng thử</b>: dữ liệu chỉ lưu trên máy này, chưa dùng chung. Sẽ tự chuyển sang dùng chung khi có máy chủ.</span></div>' : ''}
     ${!navigator.onLine ? '<div class="banner">📴 Đang ngoại tuyến — chấm công sẽ được lưu tạm và tự đồng bộ khi có mạng.</div>' : ''}
     ${q ? `<div class="banner">⏳ ${q} lượt chấm công chờ đồng bộ <button class="btn sm y" data-x="sync">Đồng bộ ngay</button></div>` : ''}
     <main id="view"></main>
-    <nav class="bottom">${tabs().map(([k, i, t]) => `<button data-tab="${k}" class="${S.tab === k ? 'on' : ''}"><i>${i}</i>${t}${k === 'mgr' && m.pending ? `<span class="badge">${m.pending}</span>` : ''}</button>`).join('')}</nav>`;
-  ({ home: vHome, month: vMonth, req: vReq, mgr: vMgr, acc: vAcc }[S.tab] || vHome)();
+    <nav class="bottom">${tabs().map(([k, i, t]) => `<button data-tab="${k}" class="${S.tab === k ? 'on' : ''}">${i}<span>${t}</span>${k === 'mgr' && m.pending ? `<span class="badge">${m.pending}</span>` : ''}</button>`).join('')}</nav>`;
+  ({ home: vHome, month: vMonth, req: vReq, mgr: vMgr, set: vSet, acc: vAcc }[S.tab] || vHome)();
 }
 document.addEventListener('click', e => {
   const t = e.target.closest('[data-tab]'); if (t) { S.tab = t.dataset.tab; render(); window.scrollTo(0, 0); return; }
@@ -383,7 +416,8 @@ async function doPunch(type) {
       if (NATIVE) Native.vibrate(); else if (navigator.vibrate) navigator.vibrate(120);
       toast(`✅ ${type === 'IN' ? 'Check-in' : 'Check-out'} thành công lúc ${r.time.slice(11, 16)}`, 'ok');
       if (r.extra) toast('⚠️ ' + r.extra);
-      await loadMe();
+      S.data.me.today = (S.data.me.today || []).concat([{ time: r.time, date: r.time.slice(0, 10), type, valid: 'TRUE', siteName: r.site, source: r.source || 'GPS', offline: 'FALSE' }]);
+      render(); loadMe();
     } else if (r.canAsk) {
       msg(`<div class="st er">❌ ${esc(r.error)}</div><div class="st wa">Nếu bạn đang làm việc ngoài địa điểm (đi công trình, giao hồ sơ…), có thể gửi lượt chấm công này để quản lý duyệt.
         <textarea id="askR" placeholder="Lý do / nơi làm việc…" style="margin-top:6px"></textarea><button class="btn y full" id="askGo" style="margin-top:6px">📨 Gửi quản lý duyệt</button></div>`);
@@ -399,7 +433,7 @@ async function vMonth() {
   const mo = S.sub.month || ymd(now()).slice(0, 7);
   $('#view').innerHTML = `<div class="card"><div class="row"><div><label>Tháng</label><input type="month" id="moPick" value="${mo}"></div></div></div><div id="moBody"><div class="card muted">Đang tải…</div></div>`;
   $('#moPick').onchange = e => { S.sub.month = e.target.value; vMonth(); };
-  const r = await call('myMonth', { month: mo }); if (!r.ok) return $('#moBody').innerHTML = `<div class="card st er">${esc(r.error)}</div>`;
+  const r = await callV('myMonth', { month: mo }); if (!r.ok) return $('#moBody').innerHTML = `<div class="card st er">${esc(r.error)}</div>`;
   const row = r.sheet.rows[0], days = r.sheet.days, t = ymd(now()), s = row.sum;
   const first = days[0].w; // 1..7 (T2..CN)
   const cell = (d, c) => `<div class="${d.d === t ? 'today' : ''}" data-d="${d.d}"><b style="color:${d.w === 7 ? 'var(--r)' : ''}">${+d.d.slice(8)}</b><span class="code" style="color:${/V/.test(c.c) ? 'var(--r)' : /X/.test(c.c) ? 'var(--g)' : 'var(--p)'}">${esc(c.c)}</span>${c.i ? `<div class="muted" style="font-size:10px">${c.i}${c.o ? '-' + c.o : ''}</div>` : ''}</div>`;
@@ -441,7 +475,7 @@ function shareText(t) {
 async function vReq() {
   $('#view').innerHTML = `<button class="btn full" style="margin-bottom:12px" id="nReq">＋ Tạo đơn mới</button><div id="rqList"><div class="card muted">Đang tải…</div></div>`;
   $('#nReq').onclick = () => newReq();
-  const r = await call('myRequests'); if (!r.ok) return $('#rqList').innerHTML = `<div class="card st er">${esc(r.error)}</div>`;
+  const r = await callV('myRequests', {}); if (!r.ok) return $('#rqList').innerHTML = `<div class="card st er">${esc(r.error)}</div>`;
   const T = S.data.me.reqTypes;
   $('#rqList').innerHTML = `<div class="card"><h3>Đơn của tôi<span class="sp"></span><span class="muted">Phép còn: <b>${r.balance.left}</b> ngày</span></h3>${r.list.map(x => `<div class="item"><div class="t"><b>${esc(T[x.type] || x.type)}</b><span class="pill ${x.status}">${STATUS[x.status]}</span></div>
     <div class="muted">${vnDate(x.fromDate)}${x.toDate && x.toDate !== x.fromDate ? ' → ' + vnDate(x.toDate) : ''}${x.half ? ' (' + (x.half === 'AM' ? 'buổi sáng' : 'buổi chiều') + ')' : ''}${x.fromTime || x.toTime ? ' · ' + esc(x.fromTime) + (x.toTime ? ' - ' + esc(x.toTime) : '') : ''}${x.days ? ' · ' + x.days + ' ngày' : ''}</div>
@@ -480,20 +514,35 @@ function newReq(type, date) {
 /* ---------------- TAB: QUẢN LÝ ---------------- */
 function vMgr() {
   const ad = S.data.me.me.role === 'AD', sub = S.sub.mgr || 'dash';
-  const items = [['dash', 'Tổng quan'], ['appr', 'Duyệt đơn' + (S.data.me.pending ? ` (${S.data.me.pending})` : '')], ['ts', 'Bảng công'], ['logs', 'Nhật ký'], ['emp', 'Nhân viên'], ['sched', 'Xếp ca'], ['eval', 'Bình xét'], ...(S.data.me.me.role === 'AD' ? [['pay', 'Phiếu lương']] : []), ['ann', 'Gửi thông báo'],
-    ...(ad ? [['site', 'Địa điểm'], ['shift', 'Ca làm'], ['hol', 'Ngày lễ'], ['cfg', 'Cấu hình']] : [])];
+  const items = [['dash', 'Tổng quan'], ['appr', 'Duyệt đơn' + (S.data.me.pending ? ` (${S.data.me.pending})` : '')], ['ts', 'Bảng công'], ['logs', 'Nhật ký'], ['emp', 'Nhân viên'], ['sched', 'Xếp ca'], ['eval', 'Bình xét'], ...(S.data.me.me.role === 'AD' ? [['pay', 'Phiếu lương']] : []), ['ann', 'Gửi thông báo']];
   $('#view').innerHTML = `<div class="tabs">${items.map(([k, t]) => `<button data-sub="${k}" class="${k === sub ? 'on' : ''}">${t}</button>`).join('')}</div><div id="mg"><div class="card muted">Đang tải…</div></div>`;
   $$('[data-sub]').forEach(b => b.onclick = () => { S.sub.mgr = b.dataset.sub; render(); });
   ({ dash: mDash, appr: mAppr, ts: mTs, logs: mLogs, emp: mEmp, sched: mSched, eval: mEval, pay: mPay, ann: mAnn, site: mSite, shift: mShift, hol: mHol, cfg: mCfg }[sub] || mDash)();
 }
 const MG = h => { const e = $('#mg'); if (e) e.innerHTML = h; };
+function vSet() {
+  const sub = S.sub.set || 'org', items = [['org', 'Đơn vị'], ['site', 'Địa điểm'], ['shift', 'Ca làm'], ['hol', 'Ngày lễ'], ['cfg', 'Quy định & hệ thống'], ['me', 'Tài khoản của tôi']];
+  $('#view').innerHTML = `<div class="tabs">${items.map(([k, t]) => `<button data-sset="${k}" class="${k === sub ? 'on' : ''}">${t}</button>`).join('')}</div><div id="mg"><div class="card muted">Đang tải…</div></div>`;
+  $$('[data-sset]').forEach(b => b.onclick = () => { S.sub.set = b.dataset.sset; render(); });
+  if (sub === 'me') { $('#mg').innerHTML = ''; return vAcc('#mg'); }
+  ({ org: mOrg, site: mSite, shift: mShift, hol: mHol, cfg: mCfg }[sub] || mOrg)();
+}
+async function mOrg() {
+  const r = await callV('getCfg', {}); if (!r.ok) return MG(`<div class="st er">${esc(r.error)}</div>`); const c = r.cfg;
+  MG(`<div class="card"><h3>🏢 Thông tin đơn vị</h3><p class="muted">Hiển thị trên đầu ứng dụng, phiếu lương và trang khách hàng đánh giá của mọi nhân viên.</p>
+    <label>Tên công ty</label><input id="oCo" value="${esc(c.company)}"><label>Đơn vị sử dụng (chi nhánh / phòng ban)</label><input id="oUn" value="${esc(c.unit || '')}" placeholder="VD: ICD Tân Cảng Nhơn Trạch">
+    <div class="row"><div><label>Mã số thuế</label><input id="oTx" value="${esc(c.taxCode || '')}"></div><div><label>Điện thoại</label><input id="oPh" value="${esc(c.orgPhone || '')}"></div></div>
+    <label>Địa chỉ</label><input id="oAd" value="${esc(c.orgAddress || '')}"><button class="btn full" id="oGo" style="margin-top:12px">Lưu thông tin đơn vị</button></div>`);
+  $('#oGo').onclick = async e => { busy(e.target, 1); const x = await call('saveCfg', { cfg: { company: $('#oCo').value.trim(), unit: $('#oUn').value.trim(), taxCode: $('#oTx').value.trim(), orgPhone: $('#oPh').value.trim(), orgAddress: $('#oAd').value.trim() } }); busy(e.target, 0);
+    toast(x.ok ? 'Đã lưu thông tin đơn vị' : x.error, x.ok ? 'ok' : 'er'); if (x.ok) { await loadMe(); render(); } };
+}
 async function showPhoto(id) {
   modal('<h3>Ảnh xác thực</h3><p class="muted">Đang tải ảnh…</p>');
   const r = await call('photo', { id }); if ($('#modal').classList.contains('hide')) return;
   modal(`<h3>Ảnh xác thực</h3>${r.ok ? `<div class="cam"><img src="${r.data}" alt=""></div>` : `<div class="st er">${esc(r.error)}</div>`}<div class="acts"><button class="btn" data-x="close">Đóng</button></div>`);
 }
 async function mDash() {
-  const d = S.sub.dDate || ymd(now()), r = await call('dashboard', { date: d }); if (!r.ok) return MG(`<div class="st er">${esc(r.error)}</div>`);
+  const d = S.sub.dDate || ymd(now()), r = await callV('dashboard', { date: d }); if (!r.ok) return MG(`<div class="st er">${esc(r.error)}</div>`);
   const s = r.stats, f = S.sub.dFilter || '';
   const list = r.list.filter(x => !f || (f === 'late' ? x.late : x.status === f));
   MG(`<div class="card"><div class="row"><div><label>Ngày</label><input type="date" id="dDate" value="${d}"></div></div></div>
@@ -508,7 +557,7 @@ async function mDash() {
   $$('[data-ph]').forEach(b => b.onclick = () => showPhoto(b.dataset.ph));
 }
 async function mAppr() {
-  const r = await call('pending'); if (!r.ok) return MG(`<div class="st er">${esc(r.error)}</div>`);
+  const r = await callV('pending', {}); if (!r.ok) return MG(`<div class="st er">${esc(r.error)}</div>`);
   const P = r.punches || []; S.data.me.pending = r.list.length + P.length; const T = S.data.me.reqTypes;
   MG(`<div class="card"><h3>Chấm công ngoài vùng chờ duyệt (${P.length})</h3>${P.map(x => `<div class="item"><div class="t"><b>${esc(x.empName)} · ${x.type === 'IN' ? 'Vào ca' : 'Ra ca'} ${esc(x.time.slice(11, 16))}</b><span class="muted">${vnDate(x.date)}</span></div>
     <div class="muted">${esc(x.note)} · <a target="_blank" href="https://maps.google.com/?q=${x.lat},${x.lng}">xem bản đồ</a></div>
@@ -533,7 +582,7 @@ async function mTs() {
   MG(`<div class="card"><div class="row"><div><label>Tháng</label><input type="month" id="tsM" value="${mo}"></div><div><label>Bộ phận</label><input id="tsD" value="${esc(dept)}" placeholder="Tất cả"></div></div>
     <div class="row" style="margin-top:10px"><button class="btn s" id="tsCsv">⬇ Tải CSV (Excel)</button><button class="btn s" id="tsGs">📄 Xuất Google Sheet</button></div></div><div class="card muted" id="tsB">Đang tính bảng công…</div>`);
   $('#tsM').onchange = e => { S.sub.tsMonth = e.target.value; mTs(); }; $('#tsD').onchange = e => { S.sub.tsDept = e.target.value.trim(); mTs(); };
-  const r = await call('timesheet', { month: mo, dept }); if (!r.ok) return $('#tsB').innerHTML = `<div class="st er">${esc(r.error)}</div>`;
+  const r = await callV('timesheet', { month: mo, dept }); if (!r.ok) return $('#tsB').innerHTML = `<div class="st er">${esc(r.error)}</div>`;
   const ts = r.sheet, SUM = [['Công TT', 'X'], ['Phép', 'P'], ['Ốm', 'O'], ['KL', 'KL'], ['CT', 'CT'], ['Lễ', 'L'], ['Vắng', 'V'], ['NCL', 'NCL'], ['Đột xuất', 'NDX'], ['Muộn', 'late'], ['Phút muộn', 'lateMin'], ['OT thường', 'otWD'], ['OT nghỉ', 'otWE'], ['OT lễ', 'otHol'], ['Điểm', 'score'], ['Xếp loại', 'rank'], ['Thiếu chấm', 'miss'], ['TỔNG CÔNG', 'paid'], ...(ts.rows.some(x => x.sum.pay != null) ? [['Lương ước tính', 'pay']] : [])];
   $('#tsB').className = 'card tw'; $('#tsB').innerHTML = `<table class="ts"><tr><th class="n">Nhân viên</th>${ts.days.map(d => `<th class="${d.w === 7 ? 'we' : ''}">${d.d.slice(8)}<br>${WD[d.w % 7]}</th>`).join('')}${SUM.map(s => `<th>${s[0]}</th>`).join('')}</tr>
     ${ts.rows.map(x => `<tr><td class="n"><b>${esc(x.name)}</b><div class="muted">${esc(x.empId)}</div></td>${x.cells.map(c => `<td class="c${esc(c.c.split(/[+/!]/)[0])}" title="${c.i}-${c.o}">${esc(c.c)}</td>`).join('')}${SUM.map(s => `<td><b>${s[1] === 'pay' ? (x.sum.pay != null ? x.sum.pay.toLocaleString('vi-VN') : '') : x.sum[s[1]]}</b></td>`).join('')}</tr>`).join('')}</table>
@@ -548,7 +597,7 @@ async function mLogs() {
    <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="lAll" style="width:auto" ${all ? 'checked' : ''}> Gồm cả lượt bị từ chối</label><button class="btn s sm" id="lCsv" style="margin-top:6px">⬇ Tải CSV</button></div><div class="card tw" id="lB">Đang tải…</div>`);
   const re = () => { S.sub.lF = $('#lF').value; S.sub.lT = $('#lT').value; S.sub.lAll = $('#lAll').checked; mLogs(); };
   $('#lF').onchange = re; $('#lT').onchange = re; $('#lAll').onchange = re;
-  const r = await call('logs', { from: f, to, all }); if (!r.ok) return $('#lB').innerHTML = esc(r.error);
+  const r = await callV('logs', { from: f, to, all }); if (!r.ok) return $('#lB').innerHTML = esc(r.error);
   const L = r.logs.sort((a, b) => a.time < b.time ? 1 : -1);
   $('#lB').innerHTML = `<table><tr><th>Thời gian</th><th>Nhân viên</th><th>Loại</th><th>Địa điểm</th><th>Cách</th><th>±GPS</th><th>KQ</th><th>Ảnh</th><th>Ghi chú</th></tr>${L.map(l => `<tr style="${l.valid === 'TRUE' ? '' : 'background:#fff1f2'}"><td>${esc(l.time.slice(5, 16))}</td><td>${esc(l.empName)}<div class="muted">${esc(l.empId)}</div></td>
     <td>${l.type === 'IN' ? '🟢 Vào' : '🔴 Ra'}</td><td>${l.lat ? `<a target="_blank" href="https://maps.google.com/?q=${l.lat},${l.lng}">${esc(l.siteName)}</a>` : esc(l.siteName)}</td><td>${esc(l.distance)}${l.distance ? 'm' : ''}</td><td>${esc(l.accuracy)}</td>
@@ -558,7 +607,7 @@ async function mLogs() {
     ...L.map(l => [l.time, l.empId, l.empName, l.dept, l.type, l.siteName, l.lat, l.lng, l.distance, l.accuracy, l.valid, l.offline, l.source, l.note])]);
 }
 async function mEmp() {
-  const r = await call('employees'); if (!r.ok) return MG(`<div class="st er">${esc(r.error)}</div>`);
+  const r = await callV('employees', {}); if (!r.ok) return MG(`<div class="st er">${esc(r.error)}</div>`);
   S.data.emp = r; const ad = S.data.me.me.role === 'AD', q = (S.sub.eq || '').toLowerCase();
   const L = r.list.filter(e => !q || (e.id + ' ' + e.name + ' ' + e.dept).toLowerCase().includes(q)), PEN = r.list.filter(e => e.active === 'PENDING');
   MG(`<div class="card"><div class="row"><input id="eQ" placeholder="🔍 Tìm mã, tên, bộ phận…" value="${esc(S.sub.eq || '')}">${ad ? '<button class="btn" id="eNew" style="flex:0 0 auto">＋ Thêm</button>' : ''}</div></div>
@@ -607,7 +656,7 @@ function empForm(e) {
   }
 }
 async function mSched() {
-  const [e, sc] = await Promise.all([call('employees'), call('schedule', { from: ymd(now()), to: ymd(new Date(now().getTime() + 45 * 864e5)) })]);
+  const [e, sc] = await Promise.all([callV('employees', {}), callV('schedule', { from: ymd(now()), to: ymd(new Date(now().getTime() + 45 * 864e5)) })]);
   if (!e.ok) return MG(`<div class="st er">${esc(e.error)}</div>`);
   const t = ymd(now()), EM = {}; e.list.forEach(x => EM[x.id] = x.name); const SH = {}; e.shifts.forEach(x => SH[x.id] = x.name);
   MG(`<div class="card"><h3>🗓 Xếp ca / lịch nghỉ</h3><p class="muted">Đổi ca hoặc cho nghỉ theo ngày cho từng nhân viên (ưu tiên hơn ca mặc định). Chọn "Ca mặc định" để xóa lịch đã xếp.</p>
@@ -623,7 +672,7 @@ async function mSched() {
 }
 async function mEval() {
   const mo = S.sub.evM || ymd(now()).slice(0, 7);
-  const [r, g] = await Promise.all([call('evaluation', { month: mo }), call('ratings', { month: mo })]); if (!r.ok) return MG(`<div class="st er">${esc(r.error)}</div>`);
+  const [r, g] = await Promise.all([callV('evaluation', { month: mo }), callV('ratings', { month: mo })]); if (!r.ok) return MG(`<div class="st er">${esc(r.error)}</div>`);
   const RT = { XS: '🌟 Xuất sắc', TOT: '👍 Tốt', BT: '🙂 Bình thường', KEM: '👎 Kém' };
   MG(`<div class="card"><div class="row"><div><label>Tháng</label><input type="month" id="evM" value="${mo}"></div></div><p class="muted">Điểm = 100 − đi trễ/về sớm (2đ/lần) − vắng (5đ/ngày) − nghỉ đột xuất (3đ/ngày) − thiếu chấm công (2đ/lần) + chuyên cần (+5) + điểm khách hàng đánh giá. Xếp loại và thưởng theo Cấu hình.</p></div>
    <div class="card tw"><h3>🏆 Bảng xếp hạng thi đua</h3><table><tr><th>#</th><th>Nhân viên</th><th>Điểm</th><th>Xếp loại</th><th>KH đánh giá</th></tr>${r.list.map((x, i) => `<tr><td>${i < 3 ? ['🥇', '🥈', '🥉'][i] : i + 1}</td><td><b>${esc(x.name)}</b><div class="muted">${esc(x.empId)} · ${esc(x.dept)}</div></td>
@@ -632,7 +681,7 @@ async function mEval() {
   $('#evM').onchange = e => { S.sub.evM = e.target.value; mEval(); };
 }
 async function mPay() {
-  const mo = S.sub.pyM || ymd(now()).slice(0, 7), r = await call('payslips', { month: mo }); if (!r.ok) return MG(`<div class="st er">${esc(r.error)}</div>`);
+  const mo = S.sub.pyM || ymd(now()).slice(0, 7), r = await callV('payslips', { month: mo }); if (!r.ok) return MG(`<div class="st er">${esc(r.error)}</div>`);
   const L = r.list.filter(x => x.net != null);
   MG(`<div class="card"><div class="row"><div><label>Tháng</label><input type="month" id="pyM" value="${mo}"></div></div>
     <div class="row" style="margin-top:10px"><button class="btn" id="pySend">📧 Gửi phiếu lương qua email (${L.filter(x => x.email).length})</button><button class="btn s" id="pyCsv">⬇ Tải bảng lương CSV</button></div>
@@ -653,7 +702,7 @@ function mAnn() {
     toast(x.ok ? 'Đã gửi thông báo' : x.error, x.ok ? 'ok' : 'er'); if (x.ok) { $('#anT').value = ''; $('#anB').value = ''; } };
 }
 async function mSite() {
-  const r = await call('employees'); if (!r.ok) return MG(esc(r.error)); S.data.emp = r;
+  const r = await callV('employees', {}); if (!r.ok) return MG(esc(r.error)); S.data.emp = r;
   MG(`<div class="card"><h3>Địa điểm chấm công<span class="sp"></span><button class="btn sm" id="sNew">＋ Thêm</button></h3><div class="map big" id="smap"></div>
    ${r.sites.map(s => `<div class="item" data-s="${s.id}" style="cursor:pointer"><div class="t"><b>${esc(s.name)}</b><span class="muted">bán kính ${s.radius} m</span></div><div class="muted">${(+s.lat).toFixed(6)}, ${(+s.lng).toFixed(6)}${s.wifi ? ' · 📶 ' + esc(s.wifi) : ''}</div></div>`).join('') || '<p class="muted">Chưa có địa điểm. Bấm ＋ Thêm.</p>'}</div>`);
   setTimeout(() => { const c = r.sites[0] || S.pos || { lat: 10.75, lng: 106.92 }; const mp = mkMap('smap', +c.lat, +c.lng, r.sites.length ? 15 : 12); if (!mp) return;
@@ -684,7 +733,7 @@ function siteForm(s) {
   if (s.id) $('#sDel').onclick = () => confirmBox('Xóa địa điểm ' + s.name + '?', async () => { await call('deleteSite', { id: s.id }); render(); loadMe(); });
 }
 async function mShift() {
-  const r = await call('employees'); if (!r.ok) return MG(esc(r.error));
+  const r = await callV('employees', {}); if (!r.ok) return MG(esc(r.error));
   MG(`<div class="card"><h3>Ca làm việc<span class="sp"></span><button class="btn sm" id="cNew">＋ Thêm ca</button></h3>${r.shifts.map(s => `<div class="item" data-c="${esc(s.id)}" style="cursor:pointer"><div class="t"><b>${esc(s.name)}</b><span class="muted">${esc(s.id)}</span></div>
    <div class="muted">${s.start} – ${s.end} · nghỉ giữa ca ${s.breakMin} phút · cho phép muộn ${s.graceMin} phút</div></div>`).join('')}</div>`);
   const form = s => { modal(`<h3>${s.id ? 'Sửa ca' : 'Thêm ca'}</h3><div class="row"><div><label>Mã ca</label><input id="cId" value="${esc(s.id || '')}" ${s.id ? 'disabled' : ''} placeholder="VD: CA1"></div><div><label>Tên ca</label><input id="cNm" value="${esc(s.name || '')}"></div></div>
@@ -697,7 +746,7 @@ async function mShift() {
   $('#cNew').onclick = () => form({}); $$('[data-c]').forEach(el => el.onclick = () => form(r.shifts.find(x => x.id === el.dataset.c)));
 }
 async function mHol() {
-  const r = await call('employees'); if (!r.ok) return MG(esc(r.error)); const y = now().getFullYear();
+  const r = await callV('employees', {}); if (!r.ok) return MG(esc(r.error)); const y = now().getFullYear();
   const L = r.holidays.sort((a, b) => a.date < b.date ? -1 : 1);
   MG(`<div class="card"><h3>Thêm ngày lễ</h3><div class="row"><div><label>Ngày</label><input type="date" id="hD"></div><div><label>Tên</label><input id="hN" placeholder="VD: Tết Nguyên đán"></div></div>
    <div class="row" style="margin-top:10px"><button class="btn" id="hGo">Thêm</button><button class="btn s" id="hFix">Thêm lễ dương lịch ${y}</button></div><p class="muted">Tết Âm lịch và Giỗ Tổ Hùng Vương thay đổi theo năm — vui lòng thêm thủ công theo thông báo của Nhà nước.</p></div>
@@ -707,7 +756,7 @@ async function mHol() {
   $$('[data-hd]').forEach(b => b.onclick = async () => { await call('deleteHoliday', { date: b.dataset.hd }); mHol(); });
 }
 async function mCfg() {
-  const r = await call('getCfg'); if (!r.ok) return MG(esc(r.error)); const c = r.cfg;
+  const r = await callV('getCfg', {}); if (!r.ok) return MG(esc(r.error)); const c = r.cfg;
   const yn = (k, t) => `<label style="display:flex;gap:8px;align-items:center;color:var(--t);font-size:14px"><input type="checkbox" id="k_${k}" style="width:auto" ${String(c[k]).toUpperCase() === 'TRUE' ? 'checked' : ''}> ${t}</label>`;
   const tx = (k, t, ty = 'text') => `<div><label>${t}</label><input id="k_${k}" type="${ty}" value="${esc(c[k])}"></div>`;
   MG(`<div class="card"><h3>Cấu hình hệ thống</h3>${tx('company', 'Tên đơn vị')}
@@ -738,9 +787,9 @@ async function mCfg() {
 }
 
 /* ---------------- TAB: TÀI KHOẢN ---------------- */
-function vAcc() {
+function vAcc(target) {
   const m = S.data.me.me;
-  $('#view').innerHTML = `<div class="card"><h3>Thông tin cá nhân</h3><div class="kv"><span>Mã NV</span><b>${esc(m.id)}</b><span>Họ tên</span><b>${esc(m.name)}</b><span>Vai trò</span><b>${ROLE[m.role]}</b><span>Bộ phận</span><b>${esc(m.dept)}</b>
+  $(typeof target === 'string' ? target : '#view').innerHTML = `<div class="card"><h3>Thông tin cá nhân</h3><div class="kv"><span>Mã NV</span><b>${esc(m.id)}</b><span>Họ tên</span><b>${esc(m.name)}</b><span>Vai trò</span><b>${ROLE[m.role]}</b><span>Bộ phận</span><b>${esc(m.dept)}</b>
    <span>Ca làm</span><b>${esc(S.data.me.shift.name)} (${S.data.me.shift.start}-${S.data.me.shift.end})</b><span>Email</span><b>${esc(m.email) || '—'}</b></div></div>
    <div class="card"><button class="btn s full" id="aPw">🔑 Đổi mật khẩu</button>${!isStandalone() ? '<button class="btn o full" data-x="install" style="margin-top:8px">📲 Cài ứng dụng lên điện thoại</button>' : ''}
    ${NATIVE ? `<label style="display:flex;gap:8px;align-items:center;color:var(--t);font-size:14px;margin-top:12px"><input type="checkbox" id="aRem" style="width:auto" ${LS.get('remOn', true) ? 'checked' : ''}> Nhắc giờ vào/ra ca trên điện thoại</label>` : (isAndroid ? '<a class="btn g full" href="download/" style="margin-top:8px;text-decoration:none">⬇ Tải ứng dụng Android (.apk)</a>' : '')}
