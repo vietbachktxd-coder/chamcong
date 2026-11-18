@@ -13,7 +13,10 @@ const ymd = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.get
 const vnDate = s => s ? s.slice(0, 10).split('-').reverse().join('/') : '';
 const WD = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
 const ROLE = { NV: 'Nhân viên', QL: 'Quản lý', AD: 'Quản trị' };
-const STATUS = { PENDING: 'Chờ duyệt', APPROVED: 'Đã duyệt', REJECTED: 'Từ chối', CANCELLED: 'Đã hủy' };
+const STATUS = { PENDING: 'Chờ duyệt', PENDING2: 'Chờ duyệt cấp 2', APPROVED: 'Đã duyệt', REJECTED: 'Từ chối', CANCELLED: 'Đã hủy' };
+const money = v => Number(v || 0).toLocaleString('vi-VN');
+const CRED = { get() { try { const x = LS.get('cred', null); return x ? JSON.parse(decodeURIComponent(escape(atob(x)))) : null; } catch (e) { return null; } },
+  set(v) { LS.set('cred', btoa(unescape(encodeURIComponent(JSON.stringify(v))))); }, del() { LS.del('cred'); } };
 function dist(a, b, c, d) { const R = 6371000, r = x => x * Math.PI / 180;
   const h = Math.sin(r(c - a) / 2) ** 2 + Math.cos(r(a)) * Math.cos(r(c)) * Math.sin(r(d - b) / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(h)); }
 function uuid() { return (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2)).replace(/-/g, '').slice(0, 20).toUpperCase(); }
@@ -44,7 +47,7 @@ async function call(action, data = {}, opt = {}) {
   try {
     const r = await fetch(S.api, { method: 'POST', body: JSON.stringify({ action, token: S.token, appVersion: VERSION, ...data }), redirect: 'follow' });
     const j = await r.json();
-    if (j.code === 'AUTH' && !opt.noLogout) { toast(j.error, 'er'); logout(true); }
+    if (j.code === 'AUTH' && !opt.noLogout) { if (!opt.retried && await autoRelogin()) return call(action, data, { ...opt, retried: true }); toast(j.error, 'er'); logout(true); }
     if (j.code === 'UPDATE') { checkUpdate(true); }
     return j;
   } catch (e) { return { ok: false, net: true, error: 'Không có kết nối mạng hoặc máy chủ không phản hồi' }; }
@@ -185,8 +188,10 @@ setInterval(syncQueue, 60e3);
 function viewLogin(msg) {
   $('#app').innerHTML = `<div class="login"><div class="logo"><img src="icons/icon-192.png" alt=""><h2>Chấm công GPS</h2><div class="muted">Phiên bản ${VERSION}</div></div>
   <div class="card"><label>Mã nhân viên</label><input id="lgId" autocapitalize="characters" autocomplete="username" value="${esc(LS.get('lastId', ''))}">
-  <label>Mật khẩu</label><input id="lgPw" type="password" autocomplete="current-password">
-  <button class="btn full" style="margin-top:14px" id="lgGo">Đăng nhập</button>${msg ? `<div class="st er">${esc(msg)}</div>` : ''}
+  <label>Mật khẩu</label><input id="lgPw" type="password" autocomplete="current-password" value="${esc((CRED.get() || {}).pw || '')}">
+  <label style="display:flex;gap:8px;align-items:center;color:var(--t);font-size:14px;margin-top:10px"><input type="checkbox" id="lgRm" style="width:auto" ${LS.get('remember', true) ? 'checked' : ''}> Ghi nhớ đăng nhập trên máy này</label>
+  <button class="btn full" style="margin-top:12px" id="lgGo">Đăng nhập</button>${msg ? `<div class="st er">${esc(msg)}</div>` : ''}
+  <button class="btn o full" style="margin-top:10px" id="lgReg">📝 Đăng ký tài khoản nhân viên mới</button>
   ${isDemo() ? '<div class="st wa">🧪 <b>Chế độ dùng thử</b> (chưa có máy chủ): dữ liệu chỉ lưu trên máy này. Đăng nhập lần đầu: <b>ADMIN</b> / <b>admin123</b></div>' : ''}
   <details style="margin-top:12px"><summary class="muted">Cài đặt máy chủ</summary><label>URL Apps Script (/exec)</label><input id="lgApi" value="${esc(LS.get('api', ''))}" placeholder="Để trống = dùng mặc định trong config.js"></details></div>
   ${!isStandalone() ? '<button class="btn o full" data-x="install">📲 Cài ứng dụng lên điện thoại</button>' : ''}</div>`;
@@ -196,9 +201,33 @@ function viewLogin(msg) {
     const r = await call('login', { id: $('#lgId').value.trim(), password: $('#lgPw').value, deviceId: S.device }, { noLogout: true }); busy(b, 0);
     if (!r.ok) return viewLogin(r.error);
     S.token = r.token; LS.set('token', r.token); LS.set('lastId', $('#lgId').value.trim().toUpperCase());
+    LS.set('remember', $('#lgRm').checked); if ($('#lgRm').checked) CRED.set({ id: $('#lgId').value.trim().toUpperCase(), pw: $('#lgPw').value }); else CRED.del();
     await loadMe(); pollNotifs(); if (r.mustChange) changePw(true);
   };
   $('#lgGo').onclick = go; $('#lgPw').onkeydown = e => { if (e.key === 'Enter') go(); };
+  $('#lgReg').onclick = registerForm;
+}
+function registerForm() {
+  modal(`<h3>📝 Đăng ký tài khoản</h3><p class="muted">Hệ thống tự cấp <b>mã nhân viên</b>. Tài khoản dùng được sau khi Phòng TCHC duyệt.</p>
+   <label>Họ và tên *</label><input id="rgN"><div class="row"><div><label>Số điện thoại *</label><input id="rgP" type="tel"></div><div><label>Email</label><input id="rgE" type="email"></div></div>
+   <div class="row"><div><label>Bộ phận</label><input id="rgD" placeholder="VD: Khai thác"></div><div><label>Chức danh</label><input id="rgT"></div></div>
+   <label>Ngày sinh</label><input id="rgB" type="date"><div class="row"><div><label>Mật khẩu * (≥ 6 ký tự)</label><input id="rgW" type="password"></div><div><label>Nhập lại mật khẩu *</label><input id="rgW2" type="password"></div></div>
+   <div id="rgMsg"></div><div class="acts"><button class="btn s" data-x="close">Hủy</button><button class="btn" id="rgGo">Đăng ký</button></div>`);
+  $('#rgGo').onclick = async () => {
+    if ($('#rgW').value !== $('#rgW2').value) return $('#rgMsg').innerHTML = '<div class="st er">Mật khẩu nhập lại không khớp</div>';
+    busy($('#rgGo'), 1);
+    const r = await call('register', { name: $('#rgN').value, phone: $('#rgP').value, email: $('#rgE').value, dept: $('#rgD').value, title: $('#rgT').value, birthday: $('#rgB').value, password: $('#rgW').value }, { noLogout: true });
+    busy($('#rgGo'), 0); if (!r.ok) return $('#rgMsg').innerHTML = `<div class="st er">${esc(r.error)}</div>`;
+    LS.set('lastId', r.id); CRED.set({ id: r.id, pw: $('#rgW').value });
+    modal(`<h3>✅ Đăng ký thành công</h3><p>Mã nhân viên của bạn:</p><div style="font-size:30px;font-weight:800;text-align:center;color:var(--p);letter-spacing:2px">${esc(r.id)}</div>
+      <p class="muted">${r.pending ? 'Tài khoản đang chờ Phòng TCHC duyệt. Sau khi được duyệt, mở app và bấm Đăng nhập (đã ghi nhớ sẵn mã và mật khẩu).' : 'Bạn có thể đăng nhập ngay.'}</p><div class="acts"><button class="btn" id="rgOk">Đã hiểu</button></div>`);
+    $('#rgOk').onclick = () => { closeModal(); viewLogin(); };
+  };
+}
+async function autoRelogin() {
+  const c = CRED.get(); if (!c || !LS.get('remember', true)) return false;
+  const r = await call('login', { id: c.id, password: c.pw, deviceId: S.device }, { noLogout: true });
+  if (!r.ok) return false; S.token = r.token; LS.set('token', r.token); return true;
 }
 function logout(silent) { if (NATIVE) try { Native.clearSession(); } catch (e) { } S.token = ''; LS.del('token'); LS.del('me'); S.data = {}; if (!silent) toast('Đã đăng xuất'); viewLogin(); }
 function changePw(forced) {
@@ -377,8 +406,11 @@ async function vMonth() {
   $('#moBody').innerHTML = `<div class="stats" style="margin-bottom:12px"><div class="stat"><b>${s.paid}</b><span>Tổng công</span></div><div class="stat"><b>${s.late}</b><span>Lần đi muộn</span></div><div class="stat"><b>${s.ot}</b><span>Giờ làm thêm</span></div></div>
    <div class="card"><div class="cal">${['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'].map(x => `<div class="h">${x}</div>`).join('')}${'<div class="e"></div>'.repeat(first - 1)}${days.map((d, i) => cell(d, row.cells[i])).join('')}</div>
    <p class="muted" style="margin-top:10px">X: đủ công · X/2: nửa công · P: phép · O: ốm · KL: không lương · CT: công tác · L: lễ · V: vắng · !: thiếu check-out</p></div>
-   <div class="card"><h3>Tổng hợp</h3><div class="kv"><span>Công thực tế</span><b>${s.X}</b><span>Nghỉ phép / ốm / KL</span><b>${s.P} / ${s.O} / ${s.KL}</b><span>Công tác · Lễ</span><b>${s.CT} · ${s.L}</b><span>Vắng</span><b>${s.V}</b>
+   <div class="card"><h3>🏅 Thi đua tháng<span class="sp"></span><span class="pill ${s.score >= 100 ? 'APPROVED' : s.score >= 75 ? 'PENDING' : 'REJECTED'}">${esc(s.rank || '')}</span></h3><div style="font-size:28px;font-weight:800;color:var(--p)">${s.score ?? ''} điểm</div>
+     <div class="muted">${(s.scoreDetail || []).map(esc).join(' · ')}</div><button class="btn s full" id="mySlip" style="margin-top:10px">💵 Xem phiếu lương tháng</button></div>
+   <div class="card"><h3>Tổng hợp</h3><div class="kv"><span>Công thực tế</span><b>${s.X}</b><span>Nghỉ có tính công / đột xuất</span><b>${s.NCL || 0} / ${s.NDX || 0}</b><span>Tăng ca (thường / nghỉ / lễ)</span><b>${s.otWD || 0} / ${s.otWE || 0} / ${s.otHol || 0} giờ</b><span>Nghỉ phép / ốm / KL</span><b>${s.P} / ${s.O} / ${s.KL}</b><span>Công tác · Lễ</span><b>${s.CT} · ${s.L}</b><span>Vắng</span><b>${s.V}</b>
    <span>Đi muộn</span><b>${s.late} lần (${s.lateMin} phút)</b><span>Về sớm</span><b>${s.early} lần (${s.earlyMin} phút)</b><span>Thiếu check-out</span><b>${s.miss}</b>${s.pay != null ? `<span>Lương ước tính</span><b style="color:var(--g)">${s.pay.toLocaleString('vi-VN')} đ</b>` : ''}</div></div>`;
+  $('#mySlip').onclick = async () => { const x = await call('myPayslip', { month: mo }); if (!x.ok) return toast(x.error, 'er'); if (!x.slip) return toast('Chưa có mức lương để tính phiếu lương — liên hệ Phòng TCHC', 'er'); showSlip(S.data.me.me.name, S.data.me.me.id, x.slip); };
   $$('.cal [data-d]').forEach(el => el.onclick = () => {
     const d = el.dataset.d, ls = r.logs.filter(l => l.date === d).sort((a, b) => a.time < b.time ? -1 : 1), c = row.cells[days.findIndex(x => x.d === d)];
     modal(`<h3>Ngày ${vnDate(d)}</h3><div class="kv"><span>Ký hiệu</span><b>${esc(c.c) || '—'}</b><span>Giờ làm</span><b>${c.h} giờ</b><span>Đi muộn / về sớm</span><b>${c.l} / ${c.e} phút</b><span>Làm thêm</span><b>${c.ot} giờ</b></div>
@@ -388,6 +420,23 @@ async function vMonth() {
   });
 }
 
+function slipText(name, id, s) {
+  return `PHIẾU LƯƠNG THÁNG ${s.month.slice(5)}/${s.month.slice(0, 4)} - ${S.data.me.cfg.company}\n${name} (${id})\nLương cơ bản: ${money(s.base)}\nCông hưởng lương: ${s.paidDays}/${s.standardDays}\nLương theo công: ${money(s.work)}\nTăng ca (${s.otWD}h thường, ${s.otWE}h nghỉ, ${s.otHol}h lễ): ${money(s.otPay)}\nPhụ cấp: ${money(s.allowance)}\nThưởng thi đua (${s.rank}): ${money(s.bonus)}\nTổng thu nhập: ${money(s.gross)}\nTrừ BH: -${money(s.ins)}\nThuế TNCN: -${money(s.tax)}\nTHỰC LĨNH: ${money(s.net)} đ`;
+}
+function showSlip(name, id, s) {
+  const row = (a, b, st) => `<tr><td>${a}</td><td class="right" style="${st || ''}">${b}</td></tr>`;
+  modal(`<h3>💵 Phiếu lương ${s.month.slice(5)}/${s.month.slice(0, 4)}</h3><div class="muted">${esc(name)} · ${esc(id)}</div><table style="margin-top:8px">
+    ${row('Lương cơ bản', money(s.base))}${row('Công hưởng lương / công chuẩn', s.paidDays + ' / ' + s.standardDays)}${row('Lương theo công', money(s.work))}
+    ${row(`Tăng ca: ${s.otWD}h thường · ${s.otWE}h nghỉ · ${s.otHol}h lễ`, money(s.otPay))}${row('Phụ cấp', money(s.allowance))}${row(`Thưởng thi đua (${esc(s.rank)}, ${s.score} điểm)`, money(s.bonus))}
+    ${row('<b>Tổng thu nhập</b>', money(s.gross), 'font-weight:700')}${row('BHXH, BHYT, BHTN', '-' + money(s.ins))}${row(`Thuế TNCN (NPT: ${s.dependents})`, '-' + money(s.tax))}
+    ${row('<b>THỰC LĨNH</b>', money(s.net) + ' đ', 'font-weight:800;color:var(--g);font-size:16px')}</table>
+    <p class="muted">Tính tự động từ dữ liệu chấm công và quy định đã cài đặt. Thuế TNCN tính theo biểu lũy tiến và mức giảm trừ gia cảnh cài trong Cấu hình.</p>
+    <div class="acts"><button class="btn s" data-x="close">Đóng</button><button class="btn" id="slShare">📤 Gửi Zalo / chia sẻ</button></div>`);
+  $('#slShare').onclick = () => shareText(slipText(name, id, s));
+}
+function shareText(t) {
+  if (NATIVE && Native.share) Native.share(t); else if (navigator.share) navigator.share({ text: t }).catch(() => {}); else navigator.clipboard.writeText(t).then(() => toast('Đã chép — dán vào Zalo để gửi', 'ok'));
+}
 /* ---------------- TAB: ĐƠN TỪ ---------------- */
 async function vReq() {
   $('#view').innerHTML = `<button class="btn full" style="margin-bottom:12px" id="nReq">＋ Tạo đơn mới</button><div id="rqList"><div class="card muted">Đang tải…</div></div>`;
@@ -396,40 +445,46 @@ async function vReq() {
   const T = S.data.me.reqTypes;
   $('#rqList').innerHTML = `<div class="card"><h3>Đơn của tôi<span class="sp"></span><span class="muted">Phép còn: <b>${r.balance.left}</b> ngày</span></h3>${r.list.map(x => `<div class="item"><div class="t"><b>${esc(T[x.type] || x.type)}</b><span class="pill ${x.status}">${STATUS[x.status]}</span></div>
     <div class="muted">${vnDate(x.fromDate)}${x.toDate && x.toDate !== x.fromDate ? ' → ' + vnDate(x.toDate) : ''}${x.half ? ' (' + (x.half === 'AM' ? 'buổi sáng' : 'buổi chiều') + ')' : ''}${x.fromTime || x.toTime ? ' · ' + esc(x.fromTime) + (x.toTime ? ' - ' + esc(x.toTime) : '') : ''}${x.days ? ' · ' + x.days + ' ngày' : ''}</div>
-    <div>${esc(x.reason)}</div>${x.approver ? `<div class="muted">Người duyệt: ${esc(x.approver)}${x.approverNote ? ' — ' + esc(x.approverNote) : ''}</div>` : ''}
-    ${x.status === 'PENDING' ? `<button class="btn sm s" data-cancel="${x.id}" style="margin-top:6px">Hủy đơn</button>` : ''}</div>`).join('') || '<p class="muted">Chưa có đơn nào.</p>'}</div>`;
+    <div>${esc(x.reason)}</div>${x.history ? `<div class="muted" style="font-size:12px">🕘 ${esc(x.history)}</div>` : ''}${x.approver ? `<div class="muted">Người duyệt: ${esc(x.approver)}${x.approverNote ? ' — ' + esc(x.approverNote) : ''}</div>` : ''}
+    ${/^PENDING/.test(x.status) ? `<button class="btn sm s" data-cancel="${x.id}" style="margin-top:6px">Hủy đơn</button>` : ''}</div>`).join('') || '<p class="muted">Chưa có đơn nào.</p>'}</div>`;
   $$('[data-cancel]').forEach(b => b.onclick = () => confirmBox('Hủy đơn này?', async () => { const x = await call('cancelRequest', { id: b.dataset.cancel }); toast(x.ok ? 'Đã hủy đơn' : x.error, x.ok ? 'ok' : 'er'); vReq(); }));
 }
 function newReq(type, date) {
   const T = S.data.me.reqTypes, t = date || ymd(now());
-  modal(`<h3>Tạo đơn</h3><label>Loại đơn</label><select id="rqT">${Object.keys(T).map(k => `<option value="${k}" ${k === type ? 'selected' : ''}>${T[k]}</option>`).join('')}</select>
+  modal(`<h3>Tạo đơn</h3><label>Loại đơn</label><select id="rqT">${Object.keys(T).filter(k => k !== 'DMVS').map(k => `<option value="${k}" ${k === type ? 'selected' : ''}>${T[k]}</option>`).join('')}</select>
    <div class="row"><div><label id="lbF">Từ ngày</label><input type="date" id="rqF" value="${t}"></div><div id="bxTo"><label>Đến ngày</label><input type="date" id="rqTo" value="${t}"></div></div>
    <div id="bxHalf"><label>Nghỉ nửa ngày (chỉ khi 1 ngày)</label><select id="rqH"><option value="">Cả ngày</option><option value="AM">Buổi sáng</option><option value="PM">Buổi chiều</option></select></div>
    <div class="row" id="bxTime"><div><label id="lbT1">Giờ vào</label><input type="time" id="rqT1"></div><div><label id="lbT2">Giờ ra</label><input type="time" id="rqT2"></div></div>
-   <label>Lý do</label><textarea id="rqR" placeholder="Nhập lý do…"></textarea><div id="rqMsg"></div>
+   <div id="rqHint"></div><label>Lý do</label><textarea id="rqR" placeholder="Nhập lý do…"></textarea><div id="rqMsg"></div>
    <div class="acts"><button class="btn s" data-x="close">Hủy</button><button class="btn" id="rqGo">Gửi đơn</button></div>`);
   const sync = () => {
-    const k = $('#rqT').value, leave = ['P', 'O', 'KL', 'CT'].includes(k);
-    $('#bxTo').classList.toggle('hide', !leave); $('#bxHalf').classList.toggle('hide', !leave); $('#bxTime').classList.toggle('hide', !['QCC', 'OT'].includes(k));
-    $('#lbF').textContent = leave ? 'Từ ngày' : 'Ngày'; $('#lbT1').textContent = k === 'OT' ? 'Từ giờ' : 'Giờ vào (bỏ trống nếu không cần)'; $('#lbT2').textContent = k === 'OT' ? 'Đến giờ' : 'Giờ ra (bỏ trống nếu không cần)';
+    const k = $('#rqT').value, leave = ['P', 'O', 'KL', 'CT', 'NDX', 'NCL'].includes(k), one = k === 'DT' || k === 'VS';
+    $('#bxTo').classList.toggle('hide', !leave); $('#bxHalf').classList.toggle('hide', !leave); $('#bxTime').classList.toggle('hide', !['QCC', 'OT', 'DT', 'VS'].includes(k));
+    $('#rqT2').parentElement.classList.toggle('hide', one);
+    $('#lbF').textContent = leave ? 'Từ ngày' : 'Ngày'; $('#lbT1').textContent = k === 'OT' ? 'Tăng ca từ giờ' : k === 'DT' ? 'Giờ dự kiến đến' : k === 'VS' ? 'Giờ dự kiến về' : 'Giờ vào (bỏ trống nếu không cần)';
+    $('#lbT2').textContent = k === 'OT' ? 'Đến giờ' : 'Giờ ra (bỏ trống nếu không cần)';
+    const c = S.data.me.cfg, H = { P: `Nghỉ phép năm: dưới ${c.leaveL2Days || 3} ngày quản lý bộ phận duyệt; từ ${c.leaveL2Days || 3} ngày trở lên phải đăng ký trước ${c.leaveNoticeDays || 3} ngày và qua 2 cấp duyệt (Quản lý → Ban Giám đốc). Còn ${S.data.me.balance.left} ngày phép.`,
+      NDX: 'Nghỉ đột xuất (ốm đột ngột, việc gia đình gấp…): không tính công, bị trừ điểm thi đua. Gửi trong ngày hoặc bổ sung sau.', NCL: 'Nghỉ có hưởng lương theo chế độ: kết hôn, con kết hôn, tang gia… (theo quy định Bộ luật Lao động & quy chế công ty).',
+      KL: 'Nghỉ không hưởng lương, không trừ phép năm.', OT: 'Tăng ca được tính theo hệ số: ngày thường, ngày nghỉ tuần, ngày lễ. Chỉ tính khi được duyệt.', DT: 'Được duyệt thì không tính đi trễ.', VS: 'Được duyệt thì không tính về sớm.' };
+    $('#rqHint').innerHTML = H[k] ? `<div class="st in">${H[k]}</div>` : '';
   };
   $('#rqT').onchange = sync; sync();
   $('#rqGo').onclick = async () => {
     const b = $('#rqGo'); busy(b, 1);
     const r = await call('createRequest', { req: { type: $('#rqT').value, fromDate: $('#rqF').value, toDate: $('#rqTo').value, half: $('#rqH').value, fromTime: $('#rqT1').value, toTime: $('#rqT2').value, reason: $('#rqR').value } });
     busy(b, 0); if (!r.ok) return $('#rqMsg').innerHTML = `<div class="st er">${esc(r.error)}</div>`;
-    closeModal(); toast('Đã gửi đơn, chờ quản lý duyệt', 'ok'); if (S.tab === 'req') vReq();
+    closeModal(); toast(r.level === '2' ? 'Đã gửi đơn — cần 2 cấp duyệt (Quản lý → Ban Giám đốc)' : 'Đã gửi đơn, chờ quản lý duyệt', 'ok'); if (S.tab === 'req') vReq();
   };
 }
 
 /* ---------------- TAB: QUẢN LÝ ---------------- */
 function vMgr() {
   const ad = S.data.me.me.role === 'AD', sub = S.sub.mgr || 'dash';
-  const items = [['dash', 'Tổng quan'], ['appr', 'Duyệt đơn' + (S.data.me.pending ? ` (${S.data.me.pending})` : '')], ['ts', 'Bảng công'], ['logs', 'Nhật ký'], ['emp', 'Nhân viên'], ['sched', 'Xếp ca'], ['ann', 'Gửi thông báo'],
+  const items = [['dash', 'Tổng quan'], ['appr', 'Duyệt đơn' + (S.data.me.pending ? ` (${S.data.me.pending})` : '')], ['ts', 'Bảng công'], ['logs', 'Nhật ký'], ['emp', 'Nhân viên'], ['sched', 'Xếp ca'], ['eval', 'Bình xét'], ...(S.data.me.me.role === 'AD' ? [['pay', 'Phiếu lương']] : []), ['ann', 'Gửi thông báo'],
     ...(ad ? [['site', 'Địa điểm'], ['shift', 'Ca làm'], ['hol', 'Ngày lễ'], ['cfg', 'Cấu hình']] : [])];
   $('#view').innerHTML = `<div class="tabs">${items.map(([k, t]) => `<button data-sub="${k}" class="${k === sub ? 'on' : ''}">${t}</button>`).join('')}</div><div id="mg"><div class="card muted">Đang tải…</div></div>`;
   $$('[data-sub]').forEach(b => b.onclick = () => { S.sub.mgr = b.dataset.sub; render(); });
-  ({ dash: mDash, appr: mAppr, ts: mTs, logs: mLogs, emp: mEmp, sched: mSched, ann: mAnn, site: mSite, shift: mShift, hol: mHol, cfg: mCfg }[sub] || mDash)();
+  ({ dash: mDash, appr: mAppr, ts: mTs, logs: mLogs, emp: mEmp, sched: mSched, eval: mEval, pay: mPay, ann: mAnn, site: mSite, shift: mShift, hol: mHol, cfg: mCfg }[sub] || mDash)();
 }
 const MG = h => { const e = $('#mg'); if (e) e.innerHTML = h; };
 async function showPhoto(id) {
@@ -479,7 +534,7 @@ async function mTs() {
     <div class="row" style="margin-top:10px"><button class="btn s" id="tsCsv">⬇ Tải CSV (Excel)</button><button class="btn s" id="tsGs">📄 Xuất Google Sheet</button></div></div><div class="card muted" id="tsB">Đang tính bảng công…</div>`);
   $('#tsM').onchange = e => { S.sub.tsMonth = e.target.value; mTs(); }; $('#tsD').onchange = e => { S.sub.tsDept = e.target.value.trim(); mTs(); };
   const r = await call('timesheet', { month: mo, dept }); if (!r.ok) return $('#tsB').innerHTML = `<div class="st er">${esc(r.error)}</div>`;
-  const ts = r.sheet, SUM = [['Công TT', 'X'], ['Phép', 'P'], ['Ốm', 'O'], ['KL', 'KL'], ['CT', 'CT'], ['Lễ', 'L'], ['Vắng', 'V'], ['Muộn', 'late'], ['Phút muộn', 'lateMin'], ['OT giờ', 'ot'], ['Thiếu chấm', 'miss'], ['TỔNG CÔNG', 'paid'], ...(ts.rows.some(x => x.sum.pay != null) ? [['Lương ước tính', 'pay']] : [])];
+  const ts = r.sheet, SUM = [['Công TT', 'X'], ['Phép', 'P'], ['Ốm', 'O'], ['KL', 'KL'], ['CT', 'CT'], ['Lễ', 'L'], ['Vắng', 'V'], ['NCL', 'NCL'], ['Đột xuất', 'NDX'], ['Muộn', 'late'], ['Phút muộn', 'lateMin'], ['OT thường', 'otWD'], ['OT nghỉ', 'otWE'], ['OT lễ', 'otHol'], ['Điểm', 'score'], ['Xếp loại', 'rank'], ['Thiếu chấm', 'miss'], ['TỔNG CÔNG', 'paid'], ...(ts.rows.some(x => x.sum.pay != null) ? [['Lương ước tính', 'pay']] : [])];
   $('#tsB').className = 'card tw'; $('#tsB').innerHTML = `<table class="ts"><tr><th class="n">Nhân viên</th>${ts.days.map(d => `<th class="${d.w === 7 ? 'we' : ''}">${d.d.slice(8)}<br>${WD[d.w % 7]}</th>`).join('')}${SUM.map(s => `<th>${s[0]}</th>`).join('')}</tr>
     ${ts.rows.map(x => `<tr><td class="n"><b>${esc(x.name)}</b><div class="muted">${esc(x.empId)}</div></td>${x.cells.map(c => `<td class="c${esc(c.c.split(/[+/!]/)[0])}" title="${c.i}-${c.o}">${esc(c.c)}</td>`).join('')}${SUM.map(s => `<td><b>${s[1] === 'pay' ? (x.sum.pay != null ? x.sum.pay.toLocaleString('vi-VN') : '') : x.sum[s[1]]}</b></td>`).join('')}</tr>`).join('')}</table>
     <p class="muted">X đủ công · X/2 nửa công · P phép · O ốm · KL không lương · CT công tác · L lễ · V vắng · ! thiếu check-out</p>`;
@@ -505,17 +560,21 @@ async function mLogs() {
 async function mEmp() {
   const r = await call('employees'); if (!r.ok) return MG(`<div class="st er">${esc(r.error)}</div>`);
   S.data.emp = r; const ad = S.data.me.me.role === 'AD', q = (S.sub.eq || '').toLowerCase();
-  const L = r.list.filter(e => !q || (e.id + ' ' + e.name + ' ' + e.dept).toLowerCase().includes(q));
+  const L = r.list.filter(e => !q || (e.id + ' ' + e.name + ' ' + e.dept).toLowerCase().includes(q)), PEN = r.list.filter(e => e.active === 'PENDING');
   MG(`<div class="card"><div class="row"><input id="eQ" placeholder="🔍 Tìm mã, tên, bộ phận…" value="${esc(S.sub.eq || '')}">${ad ? '<button class="btn" id="eNew" style="flex:0 0 auto">＋ Thêm</button>' : ''}</div></div>
-   <div class="card">${L.map(e => `<div class="item" ${ad ? `data-e="${e.id}" style="cursor:pointer"` : ''}><div class="t"><b>${esc(e.name)}</b><span class="muted">${esc(e.id)}</span></div>
+   ${PEN.length && ad ? `<div class="card"><h3>🆕 Đăng ký chờ duyệt (${PEN.length})</h3>${PEN.map(e => `<div class="item"><div class="t"><b>${esc(e.name)}</b><span class="muted">${esc(e.id)}</span></div><div class="muted">${esc(e.phone)} · ${esc(e.email)} · ${esc(e.dept)} · ${esc(e.title || '')}</div>
+     <div class="row" style="margin-top:6px"><button class="btn sm g" data-ae="${esc(e.id)}">✔ Duyệt</button><button class="btn sm r" data-re="${esc(e.id)}">✘ Từ chối</button></div></div>`).join('')}</div>` : ''}
+   <div class="card">${L.filter(e => e.active !== 'PENDING').map(e => `<div class="item" ${ad ? `data-e="${e.id}" style="cursor:pointer"` : ''}><div class="t"><b>${esc(e.name)}</b><span class="muted">${esc(e.id)}</span></div>
    <div class="muted">${e.title ? esc(e.title) + ' · ' : ''}${ROLE[e.role] || ''} · ${esc(e.dept)} · ${esc(e.empType || '')} · Ca ${esc(e.shiftId)} ${e.active === 'TRUE' ? '' : '· <b style="color:var(--r)">Đã khóa</b>'} ${e.hasDevice ? '· 📱 đã gắn máy' : '· chưa gắn máy'}</div></div>`).join('') || '<p class="muted">Không có nhân viên.</p>'}</div>`);
   $('#eQ').oninput = e => { S.sub.eq = e.target.value; clearTimeout(S.eqT); S.eqT = setTimeout(() => { mEmp().then(() => { const i = $('#eQ'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }); }, 400); };
+  $$('[data-ae]').forEach(b => b.onclick = async () => { const x = await call('approveEmployee', { id: b.dataset.ae }); toast(x.ok ? 'Đã duyệt — nhân viên đăng nhập được ngay' : x.error, x.ok ? 'ok' : 'er'); mEmp(); });
+  $$('[data-re]').forEach(b => b.onclick = async () => { const x = await call('approveEmployee', { id: b.dataset.re, decision: 'REJECT' }); toast(x.ok ? 'Đã từ chối' : x.error); mEmp(); });
   if (ad) { $('#eNew').onclick = () => empForm({}); $$('[data-e]').forEach(el => el.onclick = () => empForm(r.list.find(x => x.id === el.dataset.e))); }
 }
 function empForm(e) {
   const r = S.data.emp, isNew = !e.id, wd = String(e.workDays || '1,2,3,4,5,6').split(','), sid = String(e.siteIds || '').split(',');
   modal(`<h3>${isNew ? 'Thêm nhân viên' : 'Sửa: ' + esc(e.name)}</h3>
-   <div class="row"><div><label>Mã NV</label><input id="fId" value="${esc(e.id || '')}" ${isNew ? '' : 'disabled'} autocapitalize="characters"></div><div><label>Họ tên</label><input id="fNm" value="${esc(e.name || '')}"></div></div>
+   <div class="row"><div><label>Mã NV</label><input id="fId" value="${esc(e.id || '')}" ${isNew ? 'placeholder="Để trống = tự cấp mã"' : 'disabled'} autocapitalize="characters"></div><div><label>Họ tên</label><input id="fNm" value="${esc(e.name || '')}"></div></div>
    <div class="row"><div><label>Vai trò</label><select id="fRl">${Object.keys(ROLE).map(k => `<option value="${k}" ${e.role === k ? 'selected' : ''}>${ROLE[k]}</option>`).join('')}</select></div><div><label>Bộ phận</label><input id="fDp" value="${esc(e.dept || '')}"></div></div>
    <div class="row"><div><label>Ca làm</label><select id="fSh">${r.shifts.map(s => `<option value="${esc(s.id)}" ${e.shiftId === s.id ? 'selected' : ''}>${esc(s.name)} (${s.start}-${s.end})</option>`).join('')}</select></div><div><label>Số ngày phép/năm</label><input id="fLq" type="number" value="${esc(e.leaveQuota || '')}" placeholder="Mặc định"></div></div>
    <label>Ngày bắt đầu tính công</label><input id="fSd" type="date" value="${esc(e.startDate || ymd(now()))}">
@@ -526,6 +585,8 @@ function empForm(e) {
    <div class="row"><div><label>Ngày sinh</label><input id="fBd" type="date" value="${esc(e.birthday || '')}"></div><div><label>Quản lý trực tiếp</label><select id="fMg"><option value="">—</option>${r.list.filter(x => x.role !== 'NV' && x.id !== e.id).map(x => `<option value="${esc(x.id)}" ${e.managerId === x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></div></div>
    <div class="row"><div><label>Loại hợp đồng</label><select id="fCt">${['', 'Thử việc', 'Xác định thời hạn 12 tháng', 'Xác định thời hạn 24 tháng', 'Xác định thời hạn 36 tháng', 'Không xác định thời hạn', 'Thời vụ'].map(x => `<option ${e.contractType === x ? 'selected' : ''}>${x}</option>`).join('')}</select></div><div><label>Ngày hết hạn HĐ</label><input id="fCe" type="date" value="${esc(e.contractEnd || '')}"></div></div>
    ${S.data.me.me.role === 'AD' ? `<label>Lương cơ bản/tháng (VNĐ, để ước tính lương theo công)</label><input id="fSa" type="number" value="${esc(e.salary || '')}">` : ''}
+   <div class="row"><div><label>Địa chỉ</label><input id="fAd" value="${esc(e.address || '')}"></div><div><label>Liên hệ khẩn cấp</label><input id="fEc" value="${esc(e.emergency || '')}"></div></div>
+   ${S.data.me.me.role === 'AD' ? `<div class="row"><div><label>Phụ cấp/tháng</label><input id="fAl" type="number" value="${esc(e.allowance || '')}"></div><div><label>Lương đóng BH (trống = lương CB)</label><input id="fIs" type="number" value="${esc(e.insSalary || '')}"></div><div><label>Số người phụ thuộc</label><input id="fDe" type="number" value="${esc(e.dependents || '')}"></div></div>` : ''}
    <label>Ghi chú</label><input id="fNo" value="${esc(e.note || '')}">
    <div class="row"><div><label>Email (nhận nhắc việc, duyệt đơn)</label><input id="fEm" type="email" value="${esc(e.email || '')}"></div><div><label>Điện thoại</label><input id="fPh" value="${esc(e.phone || '')}"></div></div>
    <label style="display:flex;gap:6px;align-items:center;margin-top:10px"><input type="checkbox" id="fAc" style="width:auto" ${e.active !== 'FALSE' ? 'checked' : ''}> Đang làm việc (bỏ chọn để khóa tài khoản)</label>
@@ -536,8 +597,9 @@ function empForm(e) {
       workDays: $$('.fWd').filter(x => x.checked).map(x => x.value).join(','), siteIds: $$('.fSt').filter(x => x.checked).map(x => x.value).join(','), email: $('#fEm').value, phone: $('#fPh').value, active: $('#fAc').checked,
       title: $('#fTi').value, empType: $('#fTy').value, birthday: $('#fBd').value, managerId: $('#fMg').value, contractType: $('#fCt').value, contractEnd: $('#fCe').value, note: $('#fNo').value };
     if ($('#fSa')) emp.salary = $('#fSa').value;
+    emp.address = $('#fAd').value; emp.emergency = $('#fEc').value; if ($('#fAl')) { emp.allowance = $('#fAl').value; emp.insSalary = $('#fIs').value; emp.dependents = $('#fDe').value; }
     const x = await call('saveEmployee', { emp }); if (!x.ok) return $('#fMsg').innerHTML = `<div class="st er">${esc(x.error)}</div>`;
-    closeModal(); toast(x.created ? 'Đã thêm nhân viên (mật khẩu 123456)' : 'Đã lưu', 'ok'); mEmp();
+    closeModal(); toast(x.created ? 'Đã thêm nhân viên ' + x.id + ' (mật khẩu 123456)' : 'Đã lưu', 'ok'); mEmp();
   };
   if (!isNew) {
     $('#fRp').onclick = async () => { const x = await call('resetPw', { id: e.id }); toast(x.ok ? 'Mật khẩu đã đặt lại: 123456' : x.error, x.ok ? 'ok' : 'er'); };
@@ -558,6 +620,29 @@ async function mSched() {
   $('#scGo').onclick = async ev => { const ids = $$('.scE').filter(x => x.checked).map(x => x.value); if (!ids.length) return toast('Chọn nhân viên', 'er');
     busy(ev.target, 1); const x = await call('saveSchedule', { empIds: ids, from: $('#scF').value, to: $('#scT').value, shiftId: $('#scS').value }); busy(ev.target, 0);
     toast(x.ok ? 'Đã lưu ' + x.count + ' ngày công' : x.error, x.ok ? 'ok' : 'er'); if (x.ok) mSched(); };
+}
+async function mEval() {
+  const mo = S.sub.evM || ymd(now()).slice(0, 7);
+  const [r, g] = await Promise.all([call('evaluation', { month: mo }), call('ratings', { month: mo })]); if (!r.ok) return MG(`<div class="st er">${esc(r.error)}</div>`);
+  const RT = { XS: '🌟 Xuất sắc', TOT: '👍 Tốt', BT: '🙂 Bình thường', KEM: '👎 Kém' };
+  MG(`<div class="card"><div class="row"><div><label>Tháng</label><input type="month" id="evM" value="${mo}"></div></div><p class="muted">Điểm = 100 − đi trễ/về sớm (2đ/lần) − vắng (5đ/ngày) − nghỉ đột xuất (3đ/ngày) − thiếu chấm công (2đ/lần) + chuyên cần (+5) + điểm khách hàng đánh giá. Xếp loại và thưởng theo Cấu hình.</p></div>
+   <div class="card tw"><h3>🏆 Bảng xếp hạng thi đua</h3><table><tr><th>#</th><th>Nhân viên</th><th>Điểm</th><th>Xếp loại</th><th>KH đánh giá</th></tr>${r.list.map((x, i) => `<tr><td>${i < 3 ? ['🥇', '🥈', '🥉'][i] : i + 1}</td><td><b>${esc(x.name)}</b><div class="muted">${esc(x.empId)} · ${esc(x.dept)}</div></td>
+     <td><b>${x.score}</b></td><td><span class="pill ${x.score >= 100 ? 'APPROVED' : x.score >= 75 ? 'PENDING' : 'REJECTED'}">${esc(x.rank)}</span></td><td class="muted">🌟${x.ratings.XS} 👍${x.ratings.TOT} 🙂${x.ratings.BT} 👎${x.ratings.KEM}</td></tr>`).join('')}</table></div>
+   <div class="card"><h3>💬 Khách hàng đánh giá (${(g.list || []).length})</h3>${(g.list || []).map(x => `<div class="item"><div class="t"><b>${RT[x.level] || x.level} · ${esc(x.empId)}</b><span class="muted">${esc(x.time.slice(5, 16))}</span></div><div>${esc(x.comment)}</div><div class="muted">${esc(x.customer)}</div></div>`).join('') || '<p class="muted">Chưa có đánh giá.</p>'}</div>`);
+  $('#evM').onchange = e => { S.sub.evM = e.target.value; mEval(); };
+}
+async function mPay() {
+  const mo = S.sub.pyM || ymd(now()).slice(0, 7), r = await call('payslips', { month: mo }); if (!r.ok) return MG(`<div class="st er">${esc(r.error)}</div>`);
+  const L = r.list.filter(x => x.net != null);
+  MG(`<div class="card"><div class="row"><div><label>Tháng</label><input type="month" id="pyM" value="${mo}"></div></div>
+    <div class="row" style="margin-top:10px"><button class="btn" id="pySend">📧 Gửi phiếu lương qua email (${L.filter(x => x.email).length})</button><button class="btn s" id="pyCsv">⬇ Tải bảng lương CSV</button></div>
+    <p class="muted">Nhân viên chưa có mức lương sẽ không có phiếu lương (nhập ở Quản lý › Nhân viên). Gửi Zalo: mở phiếu từng người › Gửi Zalo.</p></div>
+   <div class="card tw"><table><tr><th>Nhân viên</th><th>Công</th><th>Tăng ca</th><th>Thưởng</th><th>Tổng TN</th><th>BH</th><th>Thuế</th><th>Thực lĩnh</th><th></th></tr>${L.map(x => `<tr><td><b>${esc(x.name)}</b><div class="muted">${esc(x.empId)}</div></td><td>${x.paidDays}</td><td>${money(x.otPay)}</td><td>${money(x.bonus)}</td><td>${money(x.gross)}</td><td>${money(x.ins)}</td><td>${money(x.tax)}</td><td><b style="color:var(--g)">${money(x.net)}</b></td><td><button class="btn sm s" data-sl="${esc(x.empId)}">Xem</button></td></tr>`).join('') || '<tr><td colspan="9" class="muted">Chưa có nhân viên nào được nhập mức lương.</td></tr>'}</table></div>`);
+  $('#pyM').onchange = e => { S.sub.pyM = e.target.value; mPay(); };
+  $$('[data-sl]').forEach(b => b.onclick = () => { const x = L.find(y => y.empId === b.dataset.sl); showSlip(x.name, x.empId, x); });
+  $('#pySend').onclick = () => confirmBox('Gửi phiếu lương tháng ' + mo.slice(5) + '/' + mo.slice(0, 4) + ' qua email cho nhân viên?', async () => { const x = await call('sendPayslips', { month: mo }); toast(x.ok ? `Đã gửi ${x.sent} phiếu lương${x.miss.length ? '; chưa có email: ' + x.miss.join(', ') : ''}` : x.error, x.ok ? 'ok' : 'er'); });
+  $('#pyCsv').onclick = () => csvDownload('BangLuong_' + mo + '.csv', [['Mã NV', 'Họ tên', 'Bộ phận', 'Lương CB', 'Công', 'Lương theo công', 'OT thường (h)', 'OT nghỉ (h)', 'OT lễ (h)', 'Tiền tăng ca', 'Phụ cấp', 'Xếp loại', 'Thưởng', 'Tổng thu nhập', 'Bảo hiểm', 'Thuế TNCN', 'Thực lĩnh'],
+    ...L.map(x => [x.empId, x.name, x.dept, x.base, x.paidDays, x.work, x.otWD, x.otWE, x.otHol, x.otPay, x.allowance, x.rank, x.bonus, x.gross, x.ins, x.tax, x.net])]);
 }
 function mAnn() {
   const ad = S.data.me.me.role === 'AD';
@@ -631,7 +716,14 @@ async function mCfg() {
    <div class="row">${tx('minAppVersion', 'Phiên bản app tối thiểu')}${tx('remindAfterMin', 'Nhắc check-in sau giờ vào ca (phút)', 'number')}</div>
    <label>Kiểm tra Wi-Fi công ty</label><select id="k_wifiMode">${[['OFF', 'Không dùng Wi-Fi (chỉ GPS)'], ['GPS_OR_WIFI', 'GPS HOẶC Wi-Fi công ty'], ['GPS_AND_WIFI', 'GPS VÀ Wi-Fi công ty (chặt nhất)']].map(([v, t]) => `<option value="${v}" ${c.wifiMode === v ? 'selected' : ''}>${t}</option>`).join('')}</select>
    ${yn('requireApp', 'Chỉ cho chấm công bằng ứng dụng Android (chặn trình duyệt, phát hiện Fake GPS)')}${yn('notifyRejected', 'Báo quản lý khi có lượt chấm công bị từ chối')}${yn('allowOutsideRequest', 'Cho nhân viên gửi chấm công ngoài vùng để quản lý duyệt')}
-   <div class="row">${tx('standardDays', 'Công chuẩn/tháng (tính lương)', 'number')}${tx('otRate', 'Hệ số làm thêm giờ', 'number')}</div>
+   <h3 style="margin-top:14px">👤 Tài khoản</h3>${yn('selfRegister', 'Cho nhân viên tự đăng ký tài khoản')}${yn('regApproval', 'Tài khoản tự đăng ký phải được quản trị duyệt')}<div class="row">${tx('empPrefix', 'Tiền tố mã nhân viên (VD: TCL → TCL0001)')}</div>
+   <h3 style="margin-top:14px">📝 Quy định đơn từ</h3><div class="row">${tx('leaveL2Days', 'Nghỉ từ bao nhiêu ngày cần 2 cấp duyệt', 'number')}${tx('leaveNoticeDays', 'Phải báo trước (ngày) với nghỉ dài', 'number')}</div>
+   <h3 style="margin-top:14px">💵 Lương, tăng ca, thuế</h3><div class="row">${tx('standardDays', 'Công chuẩn/tháng', 'number')}${tx('otWeekday', 'Hệ số tăng ca ngày thường', 'number')}${tx('otWeekend', 'Hệ số ngày nghỉ tuần', 'number')}${tx('otHoliday', 'Hệ số ngày lễ', 'number')}</div>
+   <div class="row">${tx('otMonthCap', 'Trần tăng ca/tháng (giờ)', 'number')}${tx('otWeekCap', 'Cảnh báo tăng ca/tuần (giờ)', 'number')}${tx('insRate', 'Tỷ lệ BH người lao động đóng (%)', 'number')}</div>
+   <div class="row">${tx('taxPersonal', 'Giảm trừ bản thân/tháng', 'number')}${tx('taxDependent', 'Giảm trừ mỗi người phụ thuộc', 'number')}</div>${tx('taxTable', 'Biểu thuế (trần triệu:thuế suất %, 0 = phần còn lại)')}
+   <h3 style="margin-top:14px">🏅 Thi đua & thưởng</h3><div class="row">${tx('rankXS', 'Điểm Xuất sắc ≥', 'number')}${tx('rankTot', 'Điểm Tốt ≥', 'number')}${tx('rankKha', 'Điểm Khá ≥', 'number')}</div>
+   <div class="row">${tx('bonusXS', 'Thưởng Xuất sắc', 'number')}${tx('bonusTot', 'Thưởng Tốt', 'number')}${tx('bonusKha', 'Thưởng Khá', 'number')}</div>
+   <div class="row">${tx('rateXS', 'Điểm KH: Xuất sắc', 'number')}${tx('rateTOT', 'Tốt', 'number')}${tx('rateBT', 'Bình thường', 'number')}${tx('rateKEM', 'Kém', 'number')}</div>
    ${yn('requireSelfie', 'Bắt buộc chụp ảnh khuôn mặt khi chấm công')}${yn('bindDevice', 'Mỗi tài khoản chỉ dùng trên 1 điện thoại')}${yn('allowOffline', 'Cho phép chấm công khi mất mạng (tự đồng bộ sau)')}${yn('remindEnabled', 'Gửi email nhắc nhân viên chưa check-in (cần chạy installReminder 1 lần)')}
    <button class="btn full" id="kGo" style="margin-top:12px">Lưu cấu hình</button></div>
    <div class="card muted">Máy chủ: backend ${esc(S.data.me.backend)} · App ${VERSION}. Dữ liệu lưu tại Google Sheet của tài khoản triển khai Apps Script; ảnh xác thực lưu trong thư mục Drive "ChamCong_AnhXacThuc".</div>`);
@@ -652,11 +744,27 @@ function vAcc() {
    <span>Ca làm</span><b>${esc(S.data.me.shift.name)} (${S.data.me.shift.start}-${S.data.me.shift.end})</b><span>Email</span><b>${esc(m.email) || '—'}</b></div></div>
    <div class="card"><button class="btn s full" id="aPw">🔑 Đổi mật khẩu</button>${!isStandalone() ? '<button class="btn o full" data-x="install" style="margin-top:8px">📲 Cài ứng dụng lên điện thoại</button>' : ''}
    ${NATIVE ? `<label style="display:flex;gap:8px;align-items:center;color:var(--t);font-size:14px;margin-top:12px"><input type="checkbox" id="aRem" style="width:auto" ${LS.get('remOn', true) ? 'checked' : ''}> Nhắc giờ vào/ra ca trên điện thoại</label>` : (isAndroid ? '<a class="btn g full" href="download/" style="margin-top:8px;text-decoration:none">⬇ Tải ứng dụng Android (.apk)</a>' : '')}
+   <button class="btn s full" id="aProf" style="margin-top:8px">✏️ Cập nhật thông tin cá nhân</button>
+   <button class="btn s full" id="aQR" style="margin-top:8px">⭐ Mã QR để khách hàng đánh giá</button>
    <button class="btn s full" id="aDir" style="margin-top:8px">📒 Danh bạ công ty</button>
    <button class="btn s full" id="aShare" style="margin-top:8px">📤 Gửi link cài app cho đồng nghiệp</button>
    <button class="btn s full" id="aUp" style="margin-top:8px">🔄 Kiểm tra bản cập nhật</button><button class="btn r full" id="aOut" style="margin-top:8px">Đăng xuất</button></div>
    <p class="muted c">Chấm công GPS · giao diện ${VERSION}${NATIVE ? ' · ứng dụng ' + esc(NATIVE.versionName) : ''} · máy chủ ${esc(S.data.me.backend)}<br>Mã thiết bị: ${esc(S.device.slice(0, 10))}</p>`;
   $('#aPw').onclick = () => changePw(false);
+  $('#aProf').onclick = () => { const m = S.data.me.me;
+    modal(`<h3>✏️ Thông tin cá nhân</h3><p class="muted">Mã NV <b>${esc(m.id)}</b> · ${esc(m.dept)}. Họ tên, chức danh, lương do Phòng TCHC cập nhật.</p>
+      <div class="row"><div><label>Số điện thoại</label><input id="upP" value="${esc(m.phone || '')}"></div><div><label>Email (nhận phiếu lương)</label><input id="upE" type="email" value="${esc(m.email || '')}"></div></div>
+      <label>Ngày sinh</label><input id="upB" type="date" value="${esc(m.birthday || '')}"><label>Địa chỉ</label><input id="upA" value="${esc(m.address || '')}"><label>Người liên hệ khẩn cấp (tên, SĐT)</label><input id="upC" value="${esc(m.emergency || '')}">
+      <div id="upMsg"></div><div class="acts"><button class="btn s" data-x="close">Hủy</button><button class="btn" id="upGo">Lưu</button></div>`);
+    $('#upGo').onclick = async () => { const x = await call('updateProfile', { profile: { phone: $('#upP').value, email: $('#upE').value, birthday: $('#upB').value, address: $('#upA').value, emergency: $('#upC').value } });
+      if (!x.ok) return $('#upMsg').innerHTML = `<div class="st er">${esc(x.error)}</div>`; closeModal(); toast('Đã cập nhật thông tin', 'ok'); loadMe(); }; };
+  $('#aQR').onclick = () => { const m = S.data.me.me, link = location.origin + location.pathname.replace(/[^/]*$/, '') + 'rate.html?e=' + encodeURIComponent(m.id);
+    modal(`<h3>⭐ Khách hàng đánh giá bạn</h3><p class="muted">Đưa mã QR cho khách hàng quét bằng camera điện thoại để đánh giá thái độ phục vụ. Điểm đánh giá được cộng vào bình xét thi đua tháng.</p>
+      <div id="qrBox" style="display:flex;justify-content:center;padding:12px;background:#fff"></div><div class="c b">${esc(m.name)} · ${esc(m.id)}</div><div class="muted c" style="word-break:break-all">${esc(link)}</div>
+      <div class="acts"><button class="btn s" data-x="close">Đóng</button><button class="btn" id="qrShare">📤 Gửi link</button></div>`);
+    const draw = () => { try { new QRCode($('#qrBox'), { text: link, width: 220, height: 220 }); } catch (e) { $('#qrBox').textContent = 'Không tạo được QR (cần mạng)'; } };
+    if (window.QRCode) draw(); else { const sc = document.createElement('script'); sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js'; sc.onload = draw; sc.onerror = draw; document.head.appendChild(sc); }
+    $('#qrShare').onclick = () => shareText('Mời quý khách đánh giá nhân viên ' + m.name + ': ' + link); };
   $('#aDir').onclick = async () => { const r = await call('directory'); if (!r.ok) return toast(r.error, 'er');
     const draw = q => r.list.filter(x => !q || (x.name + ' ' + x.dept + ' ' + (x.title || '') + ' ' + x.id).toLowerCase().includes(q)).map(x => `<div class="item"><div class="t"><b>${esc(x.name)}</b><span class="muted">${esc(x.id)}</span></div>
       <div class="muted">${esc(x.title || '')}${x.title ? ' · ' : ''}${esc(x.dept)}</div><div>${x.phone ? `📞 <a href="tel:${esc(x.phone)}">${esc(x.phone)}</a> ` : ''}${x.email ? ` ✉️ ${esc(x.email)}` : ''}</div></div>`).join('') || '<p class="muted">Không tìm thấy</p>';

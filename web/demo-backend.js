@@ -98,27 +98,34 @@
  * Nâng cấp backend: dán code mới > Triển khai > Quản lý triển khai > Sửa (bút chì) > Phiên bản mới.
  * Tài khoản quản trị đầu tiên: ADMIN / admin123 (bắt buộc đổi khi đăng nhập).
  */
-const BACKEND_VERSION = '3.3.0';
+const BACKEND_VERSION = '3.4.0';
 const TZ = 'Asia/Ho_Chi_Minh';
 const T = {
-  NV: ['id', 'name', 'password', 'role', 'dept', 'shiftId', 'workDays', 'email', 'phone', 'deviceId', 'leaveQuota', 'siteIds', 'active', 'mustChange', 'startDate', 'title', 'empType', 'birthday', 'contractType', 'contractEnd', 'managerId', 'salary', 'note'],
+  NV: ['id', 'name', 'password', 'role', 'dept', 'shiftId', 'workDays', 'email', 'phone', 'deviceId', 'leaveQuota', 'siteIds', 'active', 'mustChange', 'startDate', 'title', 'empType', 'birthday', 'contractType', 'contractEnd', 'managerId', 'salary', 'note', 'address', 'emergency', 'allowance', 'insSalary', 'dependents'],
   CA: ['id', 'name', 'start', 'end', 'breakMin', 'graceMin'],
   DD: ['id', 'name', 'lat', 'lng', 'radius', 'active', 'wifi'],
   CC: ['id', 'time', 'date', 'clientTime', 'empId', 'empName', 'dept', 'type', 'siteId', 'siteName', 'lat', 'lng', 'accuracy', 'distance', 'valid', 'photoId', 'offline', 'source', 'device', 'note', 'wifi', 'client'],
-  DON: ['id', 'createdAt', 'empId', 'empName', 'dept', 'type', 'fromDate', 'toDate', 'fromTime', 'toTime', 'half', 'days', 'reason', 'status', 'approver', 'approvedAt', 'approverNote'],
+  DON: ['id', 'createdAt', 'empId', 'empName', 'dept', 'type', 'fromDate', 'toDate', 'fromTime', 'toTime', 'half', 'days', 'reason', 'status', 'approver', 'approvedAt', 'approverNote', 'level', 'history'],
   LE: ['date', 'name'],
   TB: ['id', 'time', 'to', 'title', 'body', 'by'],
   LC: ['date', 'empId', 'shiftId', 'by'],
+  DG: ['id', 'time', 'date', 'empId', 'level', 'comment', 'customer', 'device'],
   CFG: ['key', 'value']
 };
-const NAME = { NV: 'NhanVien', CA: 'CaLam', DD: 'DiaDiem', CC: 'ChamCong', DON: 'DonTu', LE: 'NgayLe', CFG: 'CauHinh', TB: 'ThongBao', LC: 'LichCa' };
+const NAME = { NV: 'NhanVien', CA: 'CaLam', DD: 'DiaDiem', CC: 'ChamCong', DON: 'DonTu', LE: 'NgayLe', CFG: 'CauHinh', TB: 'ThongBao', LC: 'LichCa', DG: 'DanhGiaKH' };
 const DEF = {
   company: 'Công ty CP ĐLGNVT XD Tân Cảng', maxAccuracy: '100', requireSelfie: 'TRUE', bindDevice: 'TRUE',
-  allowOffline: 'TRUE', offlineMaxHours: '24', minAppVersion: '3.0.0', wifiMode: 'OFF', requireApp: 'FALSE', notifyRejected: 'TRUE', allowOutsideRequest: 'TRUE', standardDays: '26', otRate: '1.5', defaultLeaveQuota: '12',
+  allowOffline: 'TRUE', offlineMaxHours: '24', minAppVersion: '3.0.0', wifiMode: 'OFF', requireApp: 'FALSE', notifyRejected: 'TRUE', allowOutsideRequest: 'TRUE', standardDays: '26', otRate: '1.5',
+  selfRegister: 'TRUE', regApproval: 'TRUE', empPrefix: 'TCL', leaveL2Days: '3', leaveNoticeDays: '3',
+  otWeekday: '1.5', otWeekend: '2', otHoliday: '3', otMonthCap: '40', otWeekCap: '12',
+  insRate: '10.5', taxPersonal: '15500000', taxDependent: '6200000', taxTable: '10:5,30:10,60:20,100:30,0:35',
+  rankXS: '100', rankTot: '90', rankKha: '75', bonusXS: '1000000', bonusTot: '500000', bonusKha: '0',
+  rateXS: '3', rateTOT: '1', rateBT: '0', rateKEM: '-3', rateLimitPerDay: '1', defaultLeaveQuota: '12',
   fullDayRatio: '0.9', remindEnabled: 'FALSE', remindAfterMin: '15', photoFolderId: ''
 };
-const REQ = { P: 'Nghỉ phép năm', O: 'Nghỉ ốm', KL: 'Nghỉ không lương', CT: 'Công tác / làm ngoài', QCC: 'Quên chấm công', DMVS: 'Đi muộn / về sớm', OT: 'Làm thêm giờ' };
-const LEAVE_TYPES = ['P', 'O', 'KL', 'CT'];
+const REQ = { DT: 'Xin đi trễ', VS: 'Xin về sớm', P: 'Nghỉ phép năm', NCL: 'Nghỉ có tính công (hiếu, hỉ, chế độ)', KL: 'Nghỉ không tính công', NDX: 'Nghỉ đột xuất', O: 'Nghỉ ốm', CT: 'Công tác / làm ngoài', QCC: 'Quên chấm công', OT: 'Đăng ký tăng ca', DMVS: 'Đi muộn / về sớm' };
+const LEAVE_TYPES = ['P', 'O', 'KL', 'CT', 'NDX', 'NCL'];
+const RATE = { XS: 'Xuất sắc', TOT: 'Tốt', BT: 'Bình thường', KEM: 'Kém' };
 
 /* ============================ TIỆN ÍCH SHEET ============================ */
 let MEMO = {};
@@ -198,6 +205,7 @@ function sitesOf(e) { const all = rows('DD').filter(s => s.id && isT(s.active)).
 function scope(u) { return rows('NV').filter(e => e.id && (u.role === 'AD' || (u.role === 'QL' && e.dept === u.dept) || e.id === u.id)); }
 
 /* ============================ HTTP ============================ */
+function locked(fn) { const l = LockService.getScriptLock(); l.waitLock(15000); try { MEMO = {}; return fn(); } finally { l.releaseLock(); } }
 function out(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
 function doGet(e) { return out(api((e && e.parameter) || {})); }
 function doPost(e) { let p = {}; try { p = JSON.parse(e.postData.contents); } catch (x) {} return out(api(p)); }
@@ -209,6 +217,9 @@ function api(p) {
     if (a === 'ping') return { ok: true, backend: BACKEND_VERSION, minAppVersion: c.minAppVersion, company: c.company, time: nowStr() };
     if (p.appVersion && verCmp(p.appVersion, c.minAppVersion) < 0) return { ok: false, code: 'UPDATE', error: 'Ứng dụng đã cũ, cần cập nhật bản ' + c.minAppVersion };
     if (a === 'login') return login(p, c);
+    if (a === 'register') return locked(() => register(p, c));
+    if (a === 'rateInfo') { const e = emp(p.e); return e && isT(e.active) ? { ok: true, id: e.id, name: e.name, title: e.title, dept: e.dept, company: c.company, levels: RATE } : { ok: false, error: 'Không tìm thấy nhân viên' }; }
+    if (a === 'rate') return locked(() => rate(p, c));
     const tk = readToken(p.token); const u = tk && emp(tk.u);
     if (!u || !isT(u.active)) return { ok: false, code: 'AUTH', error: 'Phiên đăng nhập hết hạn, vui lòng đăng nhập lại' };
     if (isT(c.bindDevice) && u.deviceId && u.deviceId !== tk.d) return { ok: false, code: 'AUTH', error: 'Tài khoản đã được chuyển sang thiết bị khác' };
@@ -224,6 +235,8 @@ function api(p) {
       case 'cancelRequest': return W(() => cancelRequest(u, p.id));
       case 'photo': return photo(u, p.id, QL);
       case 'notifs': return notifs(u, p.since);
+      case 'updateProfile': return W(() => updateProfile(u, p.profile));
+      case 'myPayslip': { const ts = timesheet([u], p.month, c, true); return { ok: true, slip: ts.rows[0].slip, sum: ts.rows[0].sum, month: ts.month }; }
       case 'directory': return { ok: true, list: rows('NV').filter(e => e.id && isT(e.active)).map(e => ({ id: e.id, name: e.name, title: e.title, dept: e.dept, phone: e.phone, email: e.email })) };
     }
     if (!QL) return { ok: false, error: 'Bạn không có quyền thực hiện chức năng này' };
@@ -233,6 +246,9 @@ function api(p) {
       case 'approvePunch': return W(() => approvePunch(u, p.id, p.decision, p.note));
       case 'schedule': return { ok: true, list: rows('LC').filter(x => x.date >= (p.from || '0') && x.date <= (p.to || '9') && scope(u).some(e => e.id === x.empId)), shifts: rows('CA') };
       case 'saveSchedule': return W(() => saveSchedule(u, p));
+      case 'evaluation': { const ts = timesheet(scope(u).filter(e => isT(e.active)), p.month, c, false);
+        return { ok: true, month: ts.month, list: ts.rows.map(r => ({ empId: r.empId, name: r.name, dept: r.dept, score: r.sum.score, rank: r.sum.rank, detail: r.sum.scoreDetail, ratings: r.sum.ratings, paid: r.sum.paid })).sort((a, b) => b.score - a.score) }; }
+      case 'ratings': return { ok: true, list: rows('DG').filter(x => x.date.slice(0, 7) === (p.month || today().slice(0, 7)) && scope(u).some(e => e.id === x.empId)).reverse().map(x => { const o = Object.assign({}, x); delete o._r; delete o.device; return o; }) };
       case 'approve': return W(() => approve(u, p.id, p.decision, p.note));
       case 'timesheet': return { ok: true, sheet: timesheet(scope(u).filter(e => isT(e.active) && (!p.dept || e.dept === p.dept)), p.month, c, u.role === 'AD') };
       case 'logs': return { ok: true, logs: logsRange(p.from, p.to, scope(u).map(e => e.id), p.all) };
@@ -254,6 +270,10 @@ function api(p) {
         const r = rows('LE').find(x => x.date === p.item.date); r ? (r.name = p.item.name, upd('LE', r)) : put('LE', p.item); return { ok: true, list: rows('LE') }; });
       case 'deleteHoliday': return W(() => { const r = rows('LE').find(x => x.date === p.date); if (r) del('LE', r._r); return { ok: true, list: rows('LE') }; });
       case 'getCfg': return { ok: true, cfg: c };
+      case 'payslips': { const ts = timesheet(scope(u).filter(e => isT(e.active)), p.month, c, true); return { ok: true, month: ts.month, list: ts.rows.map(r => Object.assign({ empId: r.empId, name: r.name, dept: r.dept, email: (emp(r.empId) || {}).email || '' }, r.slip || {})) }; }
+      case 'sendPayslips': return sendPayslips(u, p, c);
+      case 'approveEmployee': return W(() => { const e = emp(p.id); if (!e) return { ok: false, error: 'Không tìm thấy' }; e.active = p.decision === 'REJECT' ? 'FALSE' : 'TRUE'; upd('NV', e);
+        notify(e.id, e.active === 'TRUE' ? 'Tài khoản đã được duyệt' : 'Đăng ký không được duyệt', e.active === 'TRUE' ? 'Bạn có thể đăng nhập bằng mã ' + e.id : 'Liên hệ Phòng TCHC', u.id); return { ok: true }; });
       case 'archive': return W(() => archive(p.before));
       case 'saveCfg': return W(() => { Object.keys(p.cfg || {}).forEach(k => { if (k in DEF && k !== 'photoFolderId') setCfg(k, String(p.cfg[k])); }); return { ok: true, cfg: cfg() }; });
     }
@@ -264,6 +284,7 @@ function api(p) {
 /* ============================ TÀI KHOẢN ============================ */
 function login(p, c) {
   const e = emp(p.id);
+  if (e && e.active === 'PENDING' && e.password === hash(e.id, String(p.password || ''))) return { ok: false, error: 'Tài khoản ' + e.id + ' đang chờ quản trị duyệt. Vui lòng liên hệ Phòng TCHC.' };
   if (!e || !isT(e.active) || e.password !== hash(e.id, String(p.password || ''))) return { ok: false, error: 'Sai mã nhân viên hoặc mật khẩu' };
   const dev = String(p.deviceId || '');
   if (isT(c.bindDevice)) {
@@ -279,7 +300,7 @@ function changePw(u, p) {
 }
 function me(u, c) {
   const t = today(), logs = tailLogs(3000).filter(l => l.empId === u.id && l.date === t);
-  const pub = {}; ['company', 'maxAccuracy', 'requireSelfie', 'allowOffline', 'offlineMaxHours', 'minAppVersion', 'wifiMode', 'requireApp'].forEach(k => pub[k] = c[k]);
+  const pub = {}; ['company', 'maxAccuracy', 'requireSelfie', 'allowOffline', 'offlineMaxHours', 'minAppVersion', 'wifiMode', 'requireApp', 'leaveL2Days', 'leaveNoticeDays', 'allowOutsideRequest'].forEach(k => pub[k] = c[k]);
   return { ok: true, me: pubEmp(u), shift: shiftOf(u), sites: sitesOf(u), cfg: pub, today: logs, serverTime: nowStr(), backend: BACKEND_VERSION,
     balance: leaveBalance(u, c), pending: (u.role === 'QL' || u.role === 'AD') ? pendingFor(u).length + pendingPunches(u).length : 0,
     holidays: rows('LE').filter(h => h.date >= t).slice(0, 10), reqTypes: REQ };
@@ -373,12 +394,12 @@ function workDaysBetween(e, from, to, half) {
 function leaveBalance(u, c) {
   const y = today().slice(0, 4), quota = +(u.leaveQuota || c.defaultLeaveQuota);
   const used = rows('DON').filter(r => r.empId === u.id && r.type === 'P' && r.status === 'APPROVED' && r.fromDate.slice(0, 4) === y).reduce((s, r) => s + (+r.days || 0), 0);
-  const pend = rows('DON').filter(r => r.empId === u.id && r.type === 'P' && r.status === 'PENDING').reduce((s, r) => s + (+r.days || 0), 0);
+  const pend = rows('DON').filter(r => r.empId === u.id && r.type === 'P' && /^PENDING/.test(r.status)).reduce((s, r) => s + (+r.days || 0), 0);
   return { quota, used, pending: pend, left: quota - used };
 }
 function createRequest(u, r, c) {
   r = r || {}; const type = r.type;
-  if (!REQ[type]) return { ok: false, error: 'Loại đơn không hợp lệ' };
+  if (!REQ[type] || type === 'DMVS') return { ok: false, error: 'Loại đơn không hợp lệ' };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(r.fromDate || '')) return { ok: false, error: 'Chọn ngày' };
   const toDate = LEAVE_TYPES.includes(type) ? (r.toDate || r.fromDate) : r.fromDate;
   if (toDate < r.fromDate) return { ok: false, error: 'Ngày kết thúc phải sau ngày bắt đầu' };
@@ -389,23 +410,36 @@ function createRequest(u, r, c) {
     if (!days) return { ok: false, error: 'Khoảng ngày không có ngày làm việc' };
     if (type === 'P') { const b = leaveBalance(u, c); if (days > b.left - b.pending) return { ok: false, error: 'Không đủ phép năm (còn ' + (b.left - b.pending) + ' ngày)' }; }
   }
+  let level = '1';
+  if (['P', 'KL', 'NCL', 'NDX'].includes(type) && +days >= +c.leaveL2Days) level = '2';
+  if (type === 'P' && +days >= +c.leaveL2Days && r.fromDate < addDays(today(), +c.leaveNoticeDays))
+    return { ok: false, error: 'Theo quy định, nghỉ phép từ ' + c.leaveL2Days + ' ngày phải đăng ký trước ít nhất ' + c.leaveNoticeDays + ' ngày. Trường hợp gấp, chọn "Nghỉ đột xuất".' };
+  if (type === 'NDX' && r.fromDate > addDays(today(), 1)) return { ok: false, error: 'Nghỉ đột xuất chỉ áp dụng cho hôm nay/ngày mai hoặc ngày đã qua. Nghỉ có kế hoạch, chọn Nghỉ phép năm.' };
+  if ((type === 'DT' || type === 'VS') && toMin(r.fromTime) == null) return { ok: false, error: type === 'DT' ? 'Nhập giờ dự kiến đến' : 'Nhập giờ dự kiến về' };
   if (type === 'QCC' && toMin(r.fromTime) == null && toMin(r.toTime) == null) return { ok: false, error: 'Nhập giờ vào và/hoặc giờ ra cần bổ sung' };
   if (type === 'OT' && !(toMin(r.toTime) > toMin(r.fromTime))) return { ok: false, error: 'Giờ làm thêm không hợp lệ' };
   const dup = rows('DON').find(x => x.empId === u.id && x.type === type && x.status !== 'REJECTED' && x.status !== 'CANCELLED' && x.fromDate <= toDate && x.toDate >= r.fromDate);
   if (dup && LEAVE_TYPES.includes(type)) return { ok: false, error: 'Đã có đơn trùng thời gian' };
   put('DON', { id: uid('D'), createdAt: nowStr(), empId: u.id, empName: u.name, dept: u.dept, type, fromDate: r.fromDate, toDate, fromTime: r.fromTime || '', toTime: r.toTime || '',
-    half: r.half && r.fromDate === toDate ? r.half : '', days, reason: String(r.reason).slice(0, 500), status: 'PENDING' });
+    half: r.half && r.fromDate === toDate ? r.half : '', days, reason: String(r.reason).slice(0, 500), status: 'PENDING', level, history: nowStr().slice(0, 16) + ' Gửi đơn' });
   notifyApprovers(u, type, r.fromDate);
   notifyManagers(u, 'Đơn mới: ' + REQ[type], u.name + ' gửi đơn ' + REQ[type] + ' ngày ' + r.fromDate.split('-').reverse().join('/') + '. Vào Quản lý › Duyệt đơn.');
-  return { ok: true };
+  return { ok: true, level };
 }
 function cancelRequest(u, id) {
-  const r = rows('DON').find(x => x.id === id && x.empId === u.id); if (!r || r.status !== 'PENDING') return { ok: false, error: 'Chỉ hủy được đơn đang chờ duyệt' };
+  const r = rows('DON').find(x => x.id === id && x.empId === u.id); if (!r || !/^PENDING/.test(r.status)) return { ok: false, error: 'Chỉ hủy được đơn đang chờ duyệt' };
   r.status = 'CANCELLED'; upd('DON', r); return { ok: true };
 }
-function pendingFor(u) { const ids = new Set(scope(u).filter(e => e.id !== u.id || u.role === 'AD').map(e => e.id)); return rows('DON').filter(r => r.status === 'PENDING' && ids.has(r.empId)); }
+function pendingFor(u) { const ids = new Set(scope(u).filter(e => e.id !== u.id || u.role === 'AD').map(e => e.id)); return rows('DON').filter(r => ids.has(r.empId) && (r.status === 'PENDING' || (r.status === 'PENDING2' && u.role === 'AD'))); }
 function approve(u, id, decision, note) {
   const r = pendingFor(u).find(x => x.id === id); if (!r) return { ok: false, error: 'Không tìm thấy đơn hoặc không có quyền duyệt' };
+  r.history = (r.history ? r.history + ' | ' : '') + nowStr().slice(0, 16) + ' ' + (decision === 'APPROVE' ? 'Duyệt' : 'Từ chối') + ': ' + u.name + (note ? ' (' + note + ')' : '');
+  if (decision === 'APPROVE' && r.level === '2' && r.status === 'PENDING' && u.role !== 'AD') {
+    r.status = 'PENDING2'; upd('DON', r);
+    rows('NV').filter(e => isT(e.active) && e.role === 'AD').forEach(e => notify(e.id, 'Đơn chờ duyệt cấp 2: ' + REQ[r.type], r.empName + ' · ' + r.days + ' ngày từ ' + r.fromDate.split('-').reverse().join('/') + ' · QL ' + u.name + ' đã duyệt'));
+    notify(r.empId, 'Đơn đã qua duyệt cấp 1', REQ[r.type] + ' — chờ Ban Giám đốc/Quản trị duyệt cấp 2', u.id);
+    return { ok: true, step: 2 };
+  }
   r.status = decision === 'APPROVE' ? 'APPROVED' : 'REJECTED'; r.approver = u.id + ' - ' + u.name; r.approvedAt = nowStr(); r.approverNote = note || ''; upd('DON', r);
   if (r.status === 'APPROVED' && r.type === 'QCC') {
     const e = emp(r.empId), base = { date: r.fromDate, empId: e.id, empName: e.name, dept: e.dept, siteId: '', siteName: 'Bổ sung theo đơn', lat: '', lng: '', accuracy: '', distance: '', valid: 'TRUE', photoId: '', offline: 'FALSE', source: 'DON', device: '', note: 'Đơn ' + r.id + ' duyệt bởi ' + u.id };
@@ -421,7 +455,7 @@ function notifyApprovers(u, type, date) {
   rows('NV').filter(e => isT(e.active) && e.email && e.id !== u.id && (e.role === 'AD' || (e.role === 'QL' && e.dept === u.dept)))
     .forEach(e => mail(e.email, 'Đơn mới cần duyệt: ' + REQ[type] + ' - ' + u.name, u.id + ' - ' + u.name + ' gửi đơn ' + REQ[type] + ' ngày ' + date + '. Mở ứng dụng Chấm công để duyệt.'));
 }
-function mail(to, sub, body) { try { MailApp.sendEmail(to, '[Chấm công] ' + sub, body); } catch (e) {} }
+function mail(to, sub, body, html) { try { MailApp.sendEmail(to, '[Chấm công] ' + sub, body, html ? { htmlBody: html } : {}); return true; } catch (e) { return false; } }
 
 /* ============================ BẢNG CÔNG ============================ */
 function timesheet(emps, month, c, pay) {
@@ -432,10 +466,11 @@ function timesheet(emps, month, c, pay) {
   const R = rows('DON').filter(r => r.status === 'APPROVED' && ids.has(r.empId) && r.fromDate <= to && r.toDate >= from);
   const days = []; for (let d = from; d <= to; d = addDays(d, 1)) days.push({ d, w: dow(d), hol: hol[d] || '' });
   const ratio = +c.fullDayRatio || 0.9, LCm = {}, CAm = {}; rows('LC').forEach(x => { if (ids.has(x.empId) && x.date >= from && x.date <= to) LCm[x.empId + x.date] = x.shiftId; }); rows('CA').forEach(x => CAm[x.id] = x);
+  const DGm = {}; rows('DG').forEach(x => { if (ids.has(x.empId) && x.date.slice(0, 7) === month) (DGm[x.empId] = DGm[x.empId] || []).push(x.level); });
   const out = emps.map(e => {
     const s0 = shiftOf(e);
     const wd = String(e.workDays || '1,2,3,4,5,6').split(',');
-    const sum = { X: 0, P: 0, O: 0, KL: 0, CT: 0, L: 0, V: 0, late: 0, lateMin: 0, early: 0, earlyMin: 0, ot: 0, miss: 0, paid: 0 };
+    const sum = { X: 0, P: 0, O: 0, KL: 0, CT: 0, NDX: 0, NCL: 0, L: 0, V: 0, late: 0, lateMin: 0, early: 0, earlyMin: 0, ot: 0, otWD: 0, otWE: 0, otHol: 0, miss: 0, paid: 0 }, wk = {};
     const cells = days.map(D => {
       if (e.startDate && D.d < e.startDate) return { c: '', i: '', o: '', h: 0, l: 0, e: 0, ot: 0 };
       const ov = LCm[e.id + D.d], s = (ov && CAm[ov]) || s0, st = toMin(s.start), en = toMin(s.end), br = +s.breakMin || 0, gr = +s.graceMin || 0, std = Math.max(60, en - st - br);
@@ -450,6 +485,8 @@ function timesheet(emps, month, c, pay) {
       const parts = [];
       reqs.forEach(r => {
         if (r.type === 'DMVS') { late = 0; early = 0; }
+        if (r.type === 'DT') late = 0;
+        if (r.type === 'VS') early = 0;
         if (r.type === 'OT') ot += Math.max(0, (toMin(r.toTime) - toMin(r.fromTime)) / 60);
       });
       if (work) parts.push(work === 1 ? 'X' : 'X/2'), sum.X += work;
@@ -464,11 +501,14 @@ function timesheet(emps, month, c, pay) {
       if (!parts.length && isWd && D.d < t) { parts.push('V'); sum.V += 1; }
       if (open != null && D.d < t) { sum.miss++; parts.push('!'); }
       if (late) { sum.late++; sum.lateMin += late; } if (early) { sum.early++; sum.earlyMin += early; } sum.ot += ot;
+      if (ot) { if (D.hol) sum.otHol += ot; else if (!isWd) sum.otWE += ot; else sum.otWD += ot; const wkey = addDays(D.d, 1 - D.w); wk[wkey] = (wk[wkey] || 0) + ot; }
       return { c: parts.join('+').replace('+!', '!'), i: first != null ? hhmm(first) : '', o: last != null ? hhmm(last) : '', h: Math.round(mins / 6) / 10, l: late, e: early, ot: Math.round(ot * 10) / 10 };
     });
-    sum.paid = sum.X + sum.P + sum.CT + sum.L; sum.ot = Math.round(sum.ot * 10) / 10;
-    if (pay && +e.salary > 0) { const dayPay = +e.salary / (+c.standardDays || 26); sum.pay = Math.round(dayPay * sum.paid + dayPay / 8 * sum.ot * (+c.otRate || 1.5)); }
-    return { empId: e.id, name: e.name, dept: e.dept, shift: s0.name, cells, sum };
+    sum.paid = sum.X + sum.P + sum.CT + sum.L + sum.NCL; ['ot', 'otWD', 'otWE', 'otHol'].forEach(k => sum[k] = Math.round(sum[k] * 10) / 10);
+    sum.otWeekMax = Math.round(Math.max(0, ...Object.values(wk)) * 10) / 10; sum.otWarn = sum.ot > +c.otMonthCap || sum.otWeekMax > +c.otWeekCap;
+    evaluate(e, sum, month, c, DGm[e.id] || []);
+    const slip = pay && +e.salary > 0 ? payslip(e, sum, c, month) : null; if (slip) sum.pay = slip.net;
+    return { empId: e.id, name: e.name, dept: e.dept, shift: s0.name, cells, sum, slip };
   });
   return { month, days, rows: out };
 }
@@ -509,15 +549,15 @@ function dashboard(u, date, c) {
     alerts: logs.filter(l => l.valid === 'FALSE').map(l => ({ time: l.time.slice(11, 16), empId: l.empId, name: l.empName, note: l.note, lat: l.lat, lng: l.lng })) };
 }
 function saveEmployee(x) {
-  x = x || {}; const id = String(x.id || '').trim().toUpperCase();
+  x = x || {}; const id = String(x.id || '').trim().toUpperCase() || nextId(cfg());
   if (!/^[A-Z0-9_.-]{2,20}$/.test(id) || !String(x.name || '').trim()) return { ok: false, error: 'Mã NV (2-20 ký tự chữ/số) và họ tên là bắt buộc' };
   if (!['NV', 'QL', 'AD'].includes(x.role)) x.role = 'NV';
   const e = emp(id), base = e || { id, password: hash(id, '123456'), mustChange: 'TRUE', deviceId: '' };
-  ['name', 'role', 'dept', 'shiftId', 'workDays', 'email', 'phone', 'leaveQuota', 'siteIds', 'startDate', 'title', 'empType', 'birthday', 'contractType', 'contractEnd', 'managerId', 'salary', 'note'].forEach(k => { if (x[k] != null) base[k] = String(x[k]).trim(); });
+  ['name', 'role', 'dept', 'shiftId', 'workDays', 'email', 'phone', 'leaveQuota', 'siteIds', 'startDate', 'title', 'empType', 'birthday', 'contractType', 'contractEnd', 'managerId', 'salary', 'note', 'address', 'emergency', 'allowance', 'insSalary', 'dependents'].forEach(k => { if (x[k] != null) base[k] = String(x[k]).trim(); });
   base.active = x.active === false || x.active === 'FALSE' ? 'FALSE' : 'TRUE';
   if (!base.workDays) base.workDays = '1,2,3,4,5,6';
   if (!/^\d{4}-\d{2}-\d{2}$/.test(base.startDate || '')) base.startDate = today();
-  e ? upd('NV', base) : put('NV', base); return { ok: true, created: !e };
+  e ? upd('NV', base) : put('NV', base); return { ok: true, created: !e, id };
 }
 function saveSimple(k, item, prefix) {
   item = item || {}; if (!String(item.name || '').trim()) return { ok: false, error: 'Nhập tên' };
@@ -530,7 +570,7 @@ function saveSimple(k, item, prefix) {
 function delSimple(k, id) { const r = rows(k).find(x => x.id === id); if (r) del(k, r._r); return { ok: true, list: rows(k) }; }
 
 /* ============================ NHẮC VIỆC & CÀI ĐẶT ============================ */
-function setup() { ['CFG', 'CA', 'DD', 'NV', 'CC', 'DON', 'LE', 'TB', 'LC'].forEach(sh); secret(); photoFolder(cfg()); return 'OK - đã khởi tạo';}
+function setup() { ['CFG', 'CA', 'DD', 'NV', 'CC', 'DON', 'LE', 'TB', 'LC', 'DG'].forEach(sh); secret(); photoFolder(cfg()); return 'OK - đã khởi tạo';}
 /** Chạy 1 lần để bật nhắc check-in qua email (mỗi 15 phút kiểm tra). */
 function installReminder() { ScriptApp.getProjectTriggers().forEach(t => ScriptApp.deleteTrigger(t)); ScriptApp.newTrigger('remindJob').timeBased().everyMinutes(15).create(); setCfg('remindEnabled', 'TRUE'); }
 function remindJob() {
@@ -606,6 +646,87 @@ function hrAlerts(emps, date) {
     if (e.empType === 'Thử việc' && e.startDate && addDays(e.startDate, 60) <= in30) out.push({ kind: 'TV', id: e.id, name: e.name, text: 'Thử việc từ ' + e.startDate.split('-').reverse().join('/') + ' – cần đánh giá' });
   });
   return out;
+}
+
+/* ============================ ĐĂNG KÝ, HỒ SƠ, THI ĐUA, LƯƠNG, ĐÁNH GIÁ KH ============================ */
+function nextId(c) {
+  const pre = String(c.empPrefix || 'NV').toUpperCase().replace(/[^A-Z0-9]/g, ''), re = new RegExp('^' + pre + '(\\d+)$');
+  let mx = 0; rows('NV').forEach(e => { const m = String(e.id).match(re); if (m) mx = Math.max(mx, +m[1]); });
+  return pre + ('000' + (mx + 1)).slice(-4);
+}
+function register(p, c) {
+  if (!isT(c.selfRegister)) return { ok: false, error: 'Công ty chưa mở đăng ký. Liên hệ Phòng TCHC để được cấp tài khoản.' };
+  const name = String(p.name || '').trim(), phone = String(p.phone || '').replace(/[^0-9+]/g, ''), pw = String(p.password || '');
+  if (name.length < 4 || phone.length < 9) return { ok: false, error: 'Nhập đủ họ tên và số điện thoại' };
+  if (pw.length < 6) return { ok: false, error: 'Mật khẩu tối thiểu 6 ký tự' };
+  if (rows('NV').some(e => e.phone && e.phone.replace(/[^0-9+]/g, '') === phone)) return { ok: false, error: 'Số điện thoại đã được đăng ký. Liên hệ Phòng TCHC nếu quên mã nhân viên.' };
+  const id = nextId(c), need = isT(c.regApproval);
+  put('NV', { id, name, password: hash(id, pw), role: 'NV', dept: String(p.dept || '').trim(), title: String(p.title || '').trim(), email: String(p.email || '').trim(), phone,
+    birthday: /^\d{4}-\d{2}-\d{2}$/.test(p.birthday || '') ? p.birthday : '', shiftId: (rows('CA')[0] || {}).id || 'HC', workDays: '1,2,3,4,5,6', active: need ? 'PENDING' : 'TRUE',
+    mustChange: 'FALSE', startDate: today(), empType: 'Thử việc', deviceId: '' });
+  rows('NV').filter(e => isT(e.active) && e.role === 'AD').forEach(e => notify(e.id, 'Đăng ký tài khoản mới: ' + name, id + ' · ' + phone + ' · ' + (p.dept || '') + (need ? ' — vào Quản lý › Nhân viên để duyệt' : '')));
+  return { ok: true, id, pending: need };
+}
+function updateProfile(u, x) {
+  x = x || {}; const e = emp(u.id);
+  ['phone', 'email', 'birthday', 'address', 'emergency'].forEach(k => { if (x[k] != null) e[k] = String(x[k]).trim().slice(0, 200); });
+  if (e.birthday && !/^\d{4}-\d{2}-\d{2}$/.test(e.birthday)) return { ok: false, error: 'Ngày sinh không hợp lệ' };
+  upd('NV', e); return { ok: true, me: pubEmp(e) };
+}
+function evaluate(e, sum, month, c, ratings) {
+  const pts = { XS: +c.rateXS, TOT: +c.rateTOT, BT: +c.rateBT, KEM: +c.rateKEM }, cnt = { XS: 0, TOT: 0, BT: 0, KEM: 0 };
+  ratings.forEach(l => { if (l in cnt) cnt[l]++; });
+  const rp = Object.keys(cnt).reduce((s, k) => s + cnt[k] * (pts[k] || 0), 0);
+  const d = [['Điểm chuẩn', +c.scoreBase || 100], ['Đi trễ ' + sum.late + ' lần', -2 * sum.late], ['Về sớm ' + sum.early + ' lần', -2 * sum.early], ['Vắng ' + sum.V + ' ngày', -5 * sum.V],
+    ['Nghỉ đột xuất ' + sum.NDX + ' ngày', -3 * sum.NDX], ['Thiếu chấm công ' + sum.miss + ' lần', -2 * sum.miss],
+    ['Chuyên cần (không trễ/sớm/vắng)', !sum.late && !sum.early && !sum.V && !sum.miss && sum.X > 0 ? 5 : 0], ['Khách hàng đánh giá (' + ratings.length + ' lượt)', rp]];
+  sum.score = d.reduce((s, x) => s + x[1], 0); sum.scoreDetail = d.filter(x => x[1]).map(x => x[0] + ': ' + (x[1] > 0 ? '+' : '') + x[1]);
+  sum.ratings = cnt;
+  sum.rank = sum.score >= +c.rankXS ? 'Xuất sắc' : sum.score >= +c.rankTot ? 'Tốt' : sum.score >= +c.rankKha ? 'Khá' : 'Cần cố gắng';
+  if (sum.X + sum.P + sum.NCL + sum.CT === 0) sum.rank = 'Chưa xếp loại';
+  sum.bonus = sum.rank === 'Xuất sắc' ? +c.bonusXS : sum.rank === 'Tốt' ? +c.bonusTot : sum.rank === 'Khá' ? +c.bonusKha : 0;
+}
+function pit(x, c) {
+  if (x <= 0) return 0; let tax = 0, prev = 0;
+  String(c.taxTable || '10:5,30:10,60:20,100:30,0:35').split(',').map(t => t.split(':').map(Number)).forEach(([cap, rate]) => {
+    const top = cap ? cap * 1e6 : Infinity; if (x > prev) tax += (Math.min(x, top) - prev) * rate / 100; prev = top; });
+  return Math.round(tax);
+}
+function payslip(e, sum, c, month) {
+  const R0 = v => Math.round(v), base = +e.salary || 0, dayPay = base / (+c.standardDays || 26), hour = dayPay / 8;
+  const work = R0(dayPay * sum.paid), otNormal = hour * sum.ot;
+  const otPay = R0(hour * (sum.otWD * +c.otWeekday + sum.otWE * +c.otWeekend + sum.otHol * +c.otHoliday));
+  const allowance = +e.allowance || 0, bonus = sum.bonus || 0, gross = work + otPay + allowance + bonus;
+  const ins = R0((+e.insSalary || base) * (+c.insRate || 0) / 100), dep = +e.dependents || 0;
+  const taxable = Math.max(0, gross - (otPay - otNormal) - ins - +c.taxPersonal - dep * +c.taxDependent), tax = pit(taxable, c);
+  return { month, base, standardDays: +c.standardDays, paidDays: sum.paid, work, otWD: sum.otWD, otWE: sum.otWE, otHol: sum.otHol, otPay, allowance, rank: sum.rank, score: sum.score, bonus,
+    gross, ins, dependents: dep, taxable: R0(taxable), tax, net: gross - ins - tax, late: sum.late, V: sum.V, P: sum.P, KL: sum.KL + sum.NDX };
+}
+function slipHtml(name, id, s, c) {
+  const f = v => Number(v || 0).toLocaleString('vi-VN'), row = (a, b, bold) => '<tr><td style="padding:6px 10px;border-bottom:1px solid #eee">' + a + '</td><td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right' + (bold ? ';font-weight:bold' : '') + '">' + b + '</td></tr>';
+  return '<div style="font-family:Times New Roman,serif;max-width:560px"><h2 style="color:#0b5cad;margin:0">PHIẾU LƯƠNG THÁNG ' + s.month.slice(5) + '/' + s.month.slice(0, 4) + '</h2><p>' + c.company + '<br><b>' + name + '</b> — Mã NV: ' + id + '</p><table style="border-collapse:collapse;width:100%">' +
+    row('Lương cơ bản', f(s.base)) + row('Công chuẩn / Công hưởng lương', s.standardDays + ' / ' + s.paidDays) + row('Lương theo công', f(s.work)) +
+    row('Tăng ca: ngày thường ' + s.otWD + 'h · ngày nghỉ ' + s.otWE + 'h · lễ ' + s.otHol + 'h', f(s.otPay)) + row('Phụ cấp', f(s.allowance)) +
+    row('Thưởng thi đua (' + s.rank + ', ' + s.score + ' điểm)', f(s.bonus)) + row('TỔNG THU NHẬP', f(s.gross), 1) + row('Trừ BHXH, BHYT, BHTN', '-' + f(s.ins)) +
+    row('Thuế TNCN (người phụ thuộc: ' + s.dependents + ')', '-' + f(s.tax)) + row('THỰC LĨNH', f(s.net) + ' đ', 1) + '</table><p style="color:#666;font-size:12px">Đi trễ ' + s.late + ' lần · Vắng ' + s.V + ' ngày · Phép ' + s.P + ' · Không lương ' + s.KL + '. Phiếu lương tính tự động từ dữ liệu chấm công; thắc mắc liên hệ Phòng TCHC.</p></div>';
+}
+function sendPayslips(u, p, c) {
+  const ts = timesheet(scope(u).filter(e => isT(e.active) && (!p.ids || p.ids.includes(e.id))), p.month, c, true); let sent = 0; const miss = [];
+  ts.rows.forEach(r => { const e = emp(r.empId); if (!r.slip) return; if (!e.email) { miss.push(e.name); return; }
+    if (mail(e.email, 'Phiếu lương tháng ' + ts.month.slice(5) + '/' + ts.month.slice(0, 4), 'Thực lĩnh: ' + r.slip.net, slipHtml(e.name, e.id, r.slip, c))) sent++;
+    notify(e.id, 'Phiếu lương tháng ' + ts.month.slice(5) + '/' + ts.month.slice(0, 4), 'Thực lĩnh ' + r.slip.net.toLocaleString('vi-VN') + ' đ. Xem chi tiết ở mục Bảng công › Phiếu lương.', u.id); });
+  return { ok: true, sent, miss };
+}
+function rate(p, c) {
+  const e = emp(p.e); if (!e || !isT(e.active)) return { ok: false, error: 'Không tìm thấy nhân viên' };
+  if (!RATE[p.level]) return { ok: false, error: 'Chọn mức đánh giá' };
+  const d = today(), dev = String(p.deviceId || '').slice(0, 40);
+  if (!dev) return { ok: false, error: 'Thiếu mã thiết bị' };
+  if (rows('DG').filter(x => x.empId === e.id && x.date === d && x.device === dev).length >= +c.rateLimitPerDay) return { ok: false, error: 'Bạn đã đánh giá nhân viên này hôm nay. Cảm ơn quý khách!' };
+  put('DG', { id: uid('G'), time: nowStr(), date: d, empId: e.id, level: p.level, comment: String(p.comment || '').slice(0, 500), customer: String(p.customer || '').slice(0, 100), device: dev });
+  notify(e.id, 'Khách hàng đánh giá: ' + RATE[p.level], (p.customer ? p.customer + ': ' : '') + String(p.comment || '').slice(0, 200));
+  if (p.level === 'KEM') notifyManagers(e, 'Khách hàng đánh giá KÉM: ' + e.name, (p.customer ? p.customer + ': ' : '') + String(p.comment || '').slice(0, 200));
+  return { ok: true };
 }
 
     return { api };

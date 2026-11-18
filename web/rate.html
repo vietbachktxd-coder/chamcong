@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Đánh giá nhân viên</title>
+<link rel="icon" href="icons/icon-192.png">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#f2f5f9;color:#111827}
+.top{background:linear-gradient(135deg,#0b5cad,#1e7be0);color:#fff;text-align:center;padding:26px 16px 22px}
+.top h1{margin:6px 0 2px;font-size:20px}.top small{opacity:.85}
+main{max-width:520px;margin:auto;padding:14px}.card{background:#fff;border-radius:14px;padding:16px;margin-bottom:12px;box-shadow:0 1px 3px #0001}
+.lv{display:grid;grid-template-columns:1fr 1fr;gap:10px}.lv button{border:2px solid #e5e7eb;background:#fff;border-radius:14px;padding:16px 6px;font-size:16px;font-weight:600;cursor:pointer}
+.lv button span{display:block;font-size:34px}.lv button.on{border-color:#0b5cad;background:#e8f1fc}
+textarea,input{width:100%;box-sizing:border-box;padding:11px;border:1px solid #d1d5db;border-radius:10px;font-size:15px;margin-top:6px;font-family:inherit}
+.go{width:100%;margin-top:12px;padding:14px;border:0;border-radius:12px;background:#16a34a;color:#fff;font-size:17px;font-weight:700}
+.go:disabled{opacity:.5}.msg{padding:10px;border-radius:10px;margin-top:10px}.ok{background:#dcfce7;color:#14532d}.er{background:#fee2e2;color:#7f1d1d}
+.muted{color:#6b7280;font-size:13px}
+</style>
+</head>
+<body>
+<div class="top"><small id="co">Công ty CP ĐLGNVT XD Tân Cảng</small><h1>Đánh giá thái độ phục vụ</h1><div id="who">Đang tải…</div></div>
+<main id="m">
+  <div class="card"><b>Quý khách đánh giá nhân viên phục vụ:</b>
+    <div class="lv" style="margin-top:12px">
+      <button data-l="XS"><span>🌟</span>Xuất sắc</button><button data-l="TOT"><span>👍</span>Tốt</button>
+      <button data-l="BT"><span>🙂</span>Bình thường</button><button data-l="KEM"><span>👎</span>Kém</button>
+    </div>
+    <textarea id="cm" rows="3" placeholder="Góp ý thêm (không bắt buộc)"></textarea>
+    <input id="cu" placeholder="Tên quý khách / đơn vị (không bắt buộc)">
+    <button class="go" id="go" disabled>Gửi đánh giá</button><div id="msg"></div>
+    <p class="muted">Đánh giá được gửi trực tiếp tới bộ phận quản lý để nâng cao chất lượng phục vụ. Xin cảm ơn quý khách!</p>
+  </div>
+</main>
+<script src="config.js"></script>
+<script>
+const API = window.API_URL, e = new URLSearchParams(location.search).get('e') || '';
+let lv = '', dev = '';
+try { dev = localStorage.getItem('rate_dev') || ('R' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8)); localStorage.setItem('rate_dev', dev); } catch (x) { dev = 'R' + Math.random().toString(36).slice(2); }
+const call = p => fetch(API, { method: 'POST', body: JSON.stringify(p) }).then(r => r.json()).catch(() => ({ ok: false, error: 'Không có kết nối mạng' }));
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+call({ action: 'rateInfo', e }).then(r => {
+  if (!r.ok) { document.getElementById('who').textContent = r.error || 'Không tìm thấy nhân viên'; document.getElementById('m').innerHTML = ''; return; }
+  document.getElementById('co').textContent = r.company;
+  document.getElementById('who').innerHTML = '<b>' + esc(r.name) + '</b>' + (r.title ? ' · ' + esc(r.title) : '') + (r.dept ? ' · ' + esc(r.dept) : '');
+});
+document.querySelectorAll('[data-l]').forEach(b => b.onclick = () => { lv = b.dataset.l; document.querySelectorAll('[data-l]').forEach(x => x.classList.toggle('on', x === b)); document.getElementById('go').disabled = false; });
+document.getElementById('go').onclick = async () => {
+  const g = document.getElementById('go'); g.disabled = true; g.textContent = 'Đang gửi…';
+  const r = await call({ action: 'rate', e, level: lv, comment: document.getElementById('cm').value, customer: document.getElementById('cu').value, deviceId: dev });
+  if (r.ok) document.getElementById('m').innerHTML = '<div class="card" style="text-align:center"><div style="font-size:54px">🙏</div><h2>Cảm ơn quý khách!</h2><p>Đánh giá đã được ghi nhận.</p></div>';
+  else { document.getElementById('msg').innerHTML = '<div class="msg er">' + esc(r.error) + '</div>'; g.disabled = false; g.textContent = 'Gửi đánh giá'; }
+};
+</script>
+</body>
+</html>
