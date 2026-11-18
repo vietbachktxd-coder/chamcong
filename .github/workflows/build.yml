@@ -1,0 +1,97 @@
+name: Build APK & Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: build-deploy
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      vname: ${{ steps.ver.outputs.vname }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: ver
+        name: Version
+        run: |
+          echo "vcode=$((300 + ${{ github.run_number }}))" >> $GITHUB_OUTPUT
+          echo "vname=3.0.${{ github.run_number }}" >> $GITHUB_OUTPUT
+          echo "weburl=https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/" | tr 'A-Z' 'a-z' >> $GITHUB_OUTPUT
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Signing key
+        env:
+          KS_PASS: ${{ secrets.KS_PASS }}
+        run: |
+          if [ -z "$KS_PASS" ]; then echo "::error::Chưa khai báo secret KS_PASS (Settings > Secrets and variables > Actions)"; exit 1; fi
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in android/app/release.keystore.enc -out android/app/release.keystore -pass env:KS_PASS
+
+      - name: Build APK
+        working-directory: android
+        env:
+          KS_PASS: ${{ secrets.KS_PASS }}
+        run: |
+          gradle --no-daemon assembleRelease \
+            -PWEB_URL="${{ steps.ver.outputs.weburl }}" \
+            -PVCODE="${{ steps.ver.outputs.vcode }}" \
+            -PVNAME="${{ steps.ver.outputs.vname }}"
+
+      - name: Prepare site
+        env:
+          MSG: ${{ github.event.head_commit.message }}
+          VCODE: ${{ steps.ver.outputs.vcode }}
+          VNAME: ${{ steps.ver.outputs.vname }}
+        run: |
+          mkdir -p site
+          cp -r web/* site/
+          mkdir -p site/download
+          cp android/app/build/outputs/apk/release/app-release.apk site/download/ChamCong.apk
+          python3 -c "
+          import json, os, datetime
+          m = os.environ.get('MSG') or 'Cập nhật ứng dụng'
+          json.dump({'versionCode': int(os.environ['VCODE']), 'versionName': os.environ['VNAME'], 'apk': 'download/ChamCong.apk',
+                     'notes': m.replace('[force]', '').strip()[:300], 'force': '[force]' in m.lower(),
+                     'date': datetime.date.today().strftime('%d/%m/%Y')}, open('site/app-version.json', 'w'), ensure_ascii=False)
+          "
+          cat site/app-version.json
+
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MSG: ${{ github.event.head_commit.message }}
+        run: |
+          gh release create "v${{ steps.ver.outputs.vname }}" site/download/ChamCong.apk \
+            --title "Chấm công TCL ${{ steps.ver.outputs.vname }}" --notes "${MSG:-Cập nhật}" || true
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

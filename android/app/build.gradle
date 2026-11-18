@@ -1,0 +1,35 @@
+plugins { id 'com.android.application' }
+
+def webUrl = (project.findProperty('WEB_URL') ?: 'https://example.github.io/chamcong/').toString()
+def vCode = (project.findProperty('VCODE') ?: '300').toString().toInteger()
+def vName = (project.findProperty('VNAME') ?: '3.0.0').toString()
+
+android {
+    namespace 'vn.tancang.chamcong'
+    compileSdk 34
+    defaultConfig {
+        applicationId 'vn.tancang.chamcong'
+        minSdk 24
+        targetSdk 34
+        versionCode vCode
+        versionName vName
+        buildConfigField 'String', 'WEB_URL', "\"${webUrl}\""
+    }
+    buildFeatures { buildConfig true }
+    signingConfigs {
+        release {
+            storeFile file(System.getenv('KS_FILE') ?: 'release.keystore')
+            storePassword System.getenv('KS_PASS') ?: ''
+            keyAlias System.getenv('KS_ALIAS') ?: 'chamcong'
+            keyPassword System.getenv('KS_PASS') ?: ''
+        }
+    }
+    buildTypes {
+        release { minifyEnabled false; signingConfig signingConfigs.release }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    lint { abortOnError false; checkReleaseBuilds false }
+}
