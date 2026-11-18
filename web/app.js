@@ -281,7 +281,7 @@ function mkMap(id, lat, lng, z) {
 
 /* ---------------- TAB: CHẤM CÔNG ---------------- */
 function vHome() {
-  const m = S.data.me, sh = m.shift || {}, n = now(), logs = (m.today || []).filter(l => l.valid === 'TRUE').sort((a, b) => a.time < b.time ? -1 : 1);
+  const m = S.data.me, sh = m.shift || {}, n = now(), logs = (m.today || []).filter(l => l.valid === 'TRUE' || l.valid === 'PENDING').sort((a, b) => a.time < b.time ? -1 : 1);
   const pend = queue(), last = pend.length ? pend[pend.length - 1].type : (logs.length ? logs[logs.length - 1].type : '');
   const next = last === 'IN' ? 'OUT' : 'IN', sel = LS.get('siteSel', ''), ad = m.me.role === 'AD';
   const hol = (m.holidays || []).find(h => h.date === ymd(n));
@@ -297,7 +297,7 @@ function vHome() {
       ${ad ? '<button class="btn o sm full" id="mAddSite" style="margin-top:8px">＋ Lưu vị trí hiện tại thành nơi làm việc</button>' : ''}
       ${!m.sites.length ? `<div class="st wa">Chưa có nơi làm việc nào. ${ad ? 'Bấm nút trên khi đang đứng tại công ty để tạo.' : 'Liên hệ quản trị để được gắn nơi làm việc.'}</div>` : ''}
     </div>
-    <div class="card"><h3>Hôm nay</h3>${logs.length || pend.length ? `<ul class="tl">${logs.map(l => `<li><span class="dot ${l.type === 'IN' ? 'in' : 'out'}"></span><b>${l.time.slice(11, 16)}</b><span>${l.type === 'IN' ? 'Vào ca' : 'Ra ca'} · ${esc(l.siteName)}${l.source === 'CT' ? ' · Công tác' : ''}${l.offline === 'TRUE' ? ' · ngoại tuyến' : ''}</span></li>`).join('')}
+    <div class="card"><h3>Hôm nay</h3>${logs.length || pend.length ? `<ul class="tl">${logs.map(l => `<li><span class="dot ${l.type === 'IN' ? 'in' : 'out'}"></span><b>${l.time.slice(11, 16)}</b><span>${l.type === 'IN' ? 'Vào ca' : 'Ra ca'} · ${esc(l.siteName)}${l.source === 'CT' ? ' · Công tác' : ''}${l.offline === 'TRUE' ? ' · ngoại tuyến' : ''}${l.valid === 'PENDING' ? ' · <b style="color:var(--y)">⏳ chờ duyệt</b>' : ''}</span></li>`).join('')}
       ${pend.map(p => `<li><span class="dot ${p.type === 'IN' ? 'in' : 'out'}"></span><b>${new Date(p.clientTime).toTimeString().slice(0, 5)}</b><span>${p.type === 'IN' ? 'Vào ca' : 'Ra ca'} · ⏳ chờ đồng bộ</span></li>`).join('')}</ul>` : '<p class="muted">Chưa chấm công hôm nay.</p>'}</div>
     <div class="card"><h3>Phép năm ${n.getFullYear()}</h3><div class="kv"><span>Được hưởng</span><b>${m.balance.quota} ngày</b><span>Đã dùng</span><b>${m.balance.used} ngày</b><span>Còn lại</span><b style="color:var(--g)">${m.balance.left} ngày</b></div></div>`;
   $('#pIn').onclick = () => doPunch('IN'); $('#pOut').onclick = () => doPunch('OUT');
@@ -355,6 +355,12 @@ async function doPunch(type) {
       toast(`✅ ${type === 'IN' ? 'Check-in' : 'Check-out'} thành công lúc ${r.time.slice(11, 16)}`, 'ok');
       if (r.extra) toast('⚠️ ' + r.extra);
       await loadMe();
+    } else if (r.canAsk) {
+      msg(`<div class="st er">❌ ${esc(r.error)}</div><div class="st wa">Nếu bạn đang làm việc ngoài địa điểm (đi công trình, giao hồ sơ…), có thể gửi lượt chấm công này để quản lý duyệt.
+        <textarea id="askR" placeholder="Lý do / nơi làm việc…" style="margin-top:6px"></textarea><button class="btn y full" id="askGo" style="margin-top:6px">📨 Gửi quản lý duyệt</button></div>`);
+      $('#askGo').onclick = async () => { const why = $('#askR').value.trim(); if (why.length < 3) return toast('Nhập lý do', 'er');
+        busy($('#askGo'), 1); const x = await call('punch', { ...p, cid: 'C' + uuid(), reason: why }); busy($('#askGo'), 0);
+        if (x.ok) { toast('📨 Đã gửi quản lý duyệt lượt ' + (type === 'IN' ? 'vào ca' : 'ra ca'), 'ok'); msg(''); await loadMe(); } else toast(x.error, 'er'); };
     } else msg(`<div class="st er">❌ ${esc(r.error)}</div>`);
   } finally { S.punching = false; busy(btn, 0); }
 }
@@ -372,7 +378,7 @@ async function vMonth() {
    <div class="card"><div class="cal">${['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'].map(x => `<div class="h">${x}</div>`).join('')}${'<div class="e"></div>'.repeat(first - 1)}${days.map((d, i) => cell(d, row.cells[i])).join('')}</div>
    <p class="muted" style="margin-top:10px">X: đủ công · X/2: nửa công · P: phép · O: ốm · KL: không lương · CT: công tác · L: lễ · V: vắng · !: thiếu check-out</p></div>
    <div class="card"><h3>Tổng hợp</h3><div class="kv"><span>Công thực tế</span><b>${s.X}</b><span>Nghỉ phép / ốm / KL</span><b>${s.P} / ${s.O} / ${s.KL}</b><span>Công tác · Lễ</span><b>${s.CT} · ${s.L}</b><span>Vắng</span><b>${s.V}</b>
-   <span>Đi muộn</span><b>${s.late} lần (${s.lateMin} phút)</b><span>Về sớm</span><b>${s.early} lần (${s.earlyMin} phút)</b><span>Thiếu check-out</span><b>${s.miss}</b></div></div>`;
+   <span>Đi muộn</span><b>${s.late} lần (${s.lateMin} phút)</b><span>Về sớm</span><b>${s.early} lần (${s.earlyMin} phút)</b><span>Thiếu check-out</span><b>${s.miss}</b>${s.pay != null ? `<span>Lương ước tính</span><b style="color:var(--g)">${s.pay.toLocaleString('vi-VN')} đ</b>` : ''}</div></div>`;
   $$('.cal [data-d]').forEach(el => el.onclick = () => {
     const d = el.dataset.d, ls = r.logs.filter(l => l.date === d).sort((a, b) => a.time < b.time ? -1 : 1), c = row.cells[days.findIndex(x => x.d === d)];
     modal(`<h3>Ngày ${vnDate(d)}</h3><div class="kv"><span>Ký hiệu</span><b>${esc(c.c) || '—'}</b><span>Giờ làm</span><b>${c.h} giờ</b><span>Đi muộn / về sớm</span><b>${c.l} / ${c.e} phút</b><span>Làm thêm</span><b>${c.ot} giờ</b></div>
@@ -419,11 +425,11 @@ function newReq(type, date) {
 /* ---------------- TAB: QUẢN LÝ ---------------- */
 function vMgr() {
   const ad = S.data.me.me.role === 'AD', sub = S.sub.mgr || 'dash';
-  const items = [['dash', 'Tổng quan'], ['appr', 'Duyệt đơn' + (S.data.me.pending ? ` (${S.data.me.pending})` : '')], ['ts', 'Bảng công'], ['logs', 'Nhật ký'], ['emp', 'Nhân viên'], ['ann', 'Gửi thông báo'],
+  const items = [['dash', 'Tổng quan'], ['appr', 'Duyệt đơn' + (S.data.me.pending ? ` (${S.data.me.pending})` : '')], ['ts', 'Bảng công'], ['logs', 'Nhật ký'], ['emp', 'Nhân viên'], ['sched', 'Xếp ca'], ['ann', 'Gửi thông báo'],
     ...(ad ? [['site', 'Địa điểm'], ['shift', 'Ca làm'], ['hol', 'Ngày lễ'], ['cfg', 'Cấu hình']] : [])];
   $('#view').innerHTML = `<div class="tabs">${items.map(([k, t]) => `<button data-sub="${k}" class="${k === sub ? 'on' : ''}">${t}</button>`).join('')}</div><div id="mg"><div class="card muted">Đang tải…</div></div>`;
   $$('[data-sub]').forEach(b => b.onclick = () => { S.sub.mgr = b.dataset.sub; render(); });
-  ({ dash: mDash, appr: mAppr, ts: mTs, logs: mLogs, emp: mEmp, ann: mAnn, site: mSite, shift: mShift, hol: mHol, cfg: mCfg }[sub] || mDash)();
+  ({ dash: mDash, appr: mAppr, ts: mTs, logs: mLogs, emp: mEmp, sched: mSched, ann: mAnn, site: mSite, shift: mShift, hol: mHol, cfg: mCfg }[sub] || mDash)();
 }
 const MG = h => { const e = $('#mg'); if (e) e.innerHTML = h; };
 async function showPhoto(id) {
@@ -438,6 +444,7 @@ async function mDash() {
   MG(`<div class="card"><div class="row"><div><label>Ngày</label><input type="date" id="dDate" value="${d}"></div></div></div>
    <div class="stats" style="margin-bottom:12px">${[['', s.total, 'Nhân sự'], ['Đang làm việc', s.working, 'Đang làm'], ['Đã về', s.left, 'Đã về'], ['Chưa chấm công', s.notYet, 'Chưa chấm'], ['late', s.late, 'Đi muộn'], ['leave', s.leave, 'Nghỉ phép/CT']]
      .map(([k, v, t]) => `<div class="stat" data-f="${k}" style="cursor:pointer;${f === k && k ? 'outline:2px solid var(--p)' : ''}"><b>${v}</b><span>${t}</span></div>`).join('')}</div>
+   ${(r.hr || []).length ? `<div class="card"><h3>👥 Nhắc việc nhân sự (${r.hr.length})</h3>${r.hr.map(a => `<div class="item"><div class="t"><b>${a.kind === 'SN' ? '🎂' : a.kind === 'HD' ? '📄' : '🧪'} ${esc(a.name)}</b><span class="muted">${esc(a.id)}</span></div><div class="muted">${esc(a.text)}</div></div>`).join('')}</div>` : ''}
    ${r.alerts.length ? `<div class="card"><h3>🚨 Chấm công bị từ chối hôm nay (${r.alerts.length})</h3>${r.alerts.map(a => `<div class="item"><div class="t"><b>${esc(a.name)}</b><span class="muted">${a.time}</span></div><div class="muted">${esc(a.note)} · <a target="_blank" href="https://maps.google.com/?q=${a.lat},${a.lng}">bản đồ</a></div></div>`).join('')}</div>` : ''}
    <div class="card tw"><table><tr><th>Nhân viên</th><th>Trạng thái</th><th>Vào</th><th>Ra</th><th>Muộn</th><th>Ảnh</th></tr>${list.map(x => `<tr><td><b>${esc(x.name)}</b><div class="muted">${esc(x.id)} · ${esc(x.dept)}</div></td>
      <td>${esc(x.status)}</td><td>${x.in}</td><td>${x.out}</td><td style="color:var(--r)">${x.late ? x.late + "'" : ''}</td><td>${x.photoId ? `<button class="btn sm s" data-ph="${x.photoId}">Xem</button>` : ''}</td></tr>`).join('')}</table></div>`);
@@ -447,13 +454,19 @@ async function mDash() {
 }
 async function mAppr() {
   const r = await call('pending'); if (!r.ok) return MG(`<div class="st er">${esc(r.error)}</div>`);
-  S.data.me.pending = r.list.length; const T = S.data.me.reqTypes;
-  MG(`<div class="card"><h3>Đơn chờ duyệt (${r.list.length})</h3>${r.list.map(x => `<div class="item"><div class="t"><b>${esc(x.empName)} · ${esc(T[x.type])}</b><span class="muted">${esc(x.createdAt.slice(5, 16))}</span></div>
+  const P = r.punches || []; S.data.me.pending = r.list.length + P.length; const T = S.data.me.reqTypes;
+  MG(`<div class="card"><h3>Chấm công ngoài vùng chờ duyệt (${P.length})</h3>${P.map(x => `<div class="item"><div class="t"><b>${esc(x.empName)} · ${x.type === 'IN' ? 'Vào ca' : 'Ra ca'} ${esc(x.time.slice(11, 16))}</b><span class="muted">${vnDate(x.date)}</span></div>
+    <div class="muted">${esc(x.note)} · <a target="_blank" href="https://maps.google.com/?q=${x.lat},${x.lng}">xem bản đồ</a></div>
+    <div class="row" style="margin-top:8px">${x.photoId ? `<button class="btn sm s" data-ph="${x.photoId}">📷 Ảnh</button>` : ''}<button class="btn sm g" data-pa="${x.id}">✔ Duyệt</button><button class="btn sm r" data-pr="${x.id}">✘ Từ chối</button></div></div>`).join('') || '<p class="muted">Không có.</p>'}</div>
+   <div class="card"><h3>Đơn chờ duyệt (${r.list.length})</h3>${r.list.map(x => `<div class="item"><div class="t"><b>${esc(x.empName)} · ${esc(T[x.type])}</b><span class="muted">${esc(x.createdAt.slice(5, 16))}</span></div>
     <div class="muted">${esc(x.empId)} · ${esc(x.dept)} · ${vnDate(x.fromDate)}${x.toDate !== x.fromDate ? ' → ' + vnDate(x.toDate) : ''}${x.half ? ' (' + x.half + ')' : ''}${x.fromTime || x.toTime ? ' · ' + esc(x.fromTime) + ' - ' + esc(x.toTime) : ''}${x.days ? ' · ' + x.days + ' ngày' : ''}</div>
     <div>${esc(x.reason)}</div><div class="row" style="margin-top:8px"><button class="btn sm g" data-ap="${x.id}">✔ Duyệt</button><button class="btn sm r" data-rj="${x.id}">✘ Từ chối</button></div></div>`).join('') || '<p class="muted">Không có đơn chờ duyệt.</p>'}</div>`);
   const act = (id, dec) => modal(`<h3>${dec === 'APPROVE' ? 'Duyệt đơn' : 'Từ chối đơn'}</h3><label>Ghi chú (không bắt buộc)</label><textarea id="apN"></textarea><div class="acts"><button class="btn s" data-x="close">Hủy</button><button class="btn ${dec === 'APPROVE' ? 'g' : 'r'}" id="apGo">Xác nhận</button></div>`)
     || ($('#apGo').onclick = async () => { const x = await call('approve', { id, decision: dec, note: $('#apN').value }); closeModal(); toast(x.ok ? 'Đã xử lý đơn' : x.error, x.ok ? 'ok' : 'er'); mAppr(); render(); });
   $$('[data-ap]').forEach(b => b.onclick = () => act(b.dataset.ap, 'APPROVE')); $$('[data-rj]').forEach(b => b.onclick = () => act(b.dataset.rj, 'REJECT'));
+  const pAct = async (id, dec) => { const x = await call('approvePunch', { id, decision: dec }); toast(x.ok ? (dec === 'APPROVE' ? 'Đã duyệt' : 'Đã từ chối') : x.error, x.ok ? 'ok' : 'er'); mAppr(); };
+  $$('[data-pa]').forEach(b => b.onclick = () => pAct(b.dataset.pa, 'APPROVE')); $$('[data-pr]').forEach(b => b.onclick = () => pAct(b.dataset.pr, 'REJECT'));
+  $$('[data-ph]').forEach(b => b.onclick = () => showPhoto(b.dataset.ph));
 }
 function csvDownload(name, rows) {
   const csv = '﻿' + rows.map(r => r.map(c => '"' + String(c ?? '').replace(/"/g, '""') + '"').join(',')).join('\r\n');
@@ -466,9 +479,9 @@ async function mTs() {
     <div class="row" style="margin-top:10px"><button class="btn s" id="tsCsv">⬇ Tải CSV (Excel)</button><button class="btn s" id="tsGs">📄 Xuất Google Sheet</button></div></div><div class="card muted" id="tsB">Đang tính bảng công…</div>`);
   $('#tsM').onchange = e => { S.sub.tsMonth = e.target.value; mTs(); }; $('#tsD').onchange = e => { S.sub.tsDept = e.target.value.trim(); mTs(); };
   const r = await call('timesheet', { month: mo, dept }); if (!r.ok) return $('#tsB').innerHTML = `<div class="st er">${esc(r.error)}</div>`;
-  const ts = r.sheet, SUM = [['Công TT', 'X'], ['Phép', 'P'], ['Ốm', 'O'], ['KL', 'KL'], ['CT', 'CT'], ['Lễ', 'L'], ['Vắng', 'V'], ['Muộn', 'late'], ['Phút muộn', 'lateMin'], ['OT giờ', 'ot'], ['Thiếu chấm', 'miss'], ['TỔNG CÔNG', 'paid']];
+  const ts = r.sheet, SUM = [['Công TT', 'X'], ['Phép', 'P'], ['Ốm', 'O'], ['KL', 'KL'], ['CT', 'CT'], ['Lễ', 'L'], ['Vắng', 'V'], ['Muộn', 'late'], ['Phút muộn', 'lateMin'], ['OT giờ', 'ot'], ['Thiếu chấm', 'miss'], ['TỔNG CÔNG', 'paid'], ...(ts.rows.some(x => x.sum.pay != null) ? [['Lương ước tính', 'pay']] : [])];
   $('#tsB').className = 'card tw'; $('#tsB').innerHTML = `<table class="ts"><tr><th class="n">Nhân viên</th>${ts.days.map(d => `<th class="${d.w === 7 ? 'we' : ''}">${d.d.slice(8)}<br>${WD[d.w % 7]}</th>`).join('')}${SUM.map(s => `<th>${s[0]}</th>`).join('')}</tr>
-    ${ts.rows.map(x => `<tr><td class="n"><b>${esc(x.name)}</b><div class="muted">${esc(x.empId)}</div></td>${x.cells.map(c => `<td class="c${esc(c.c.split(/[+/!]/)[0])}" title="${c.i}-${c.o}">${esc(c.c)}</td>`).join('')}${SUM.map(s => `<td><b>${x.sum[s[1]]}</b></td>`).join('')}</tr>`).join('')}</table>
+    ${ts.rows.map(x => `<tr><td class="n"><b>${esc(x.name)}</b><div class="muted">${esc(x.empId)}</div></td>${x.cells.map(c => `<td class="c${esc(c.c.split(/[+/!]/)[0])}" title="${c.i}-${c.o}">${esc(c.c)}</td>`).join('')}${SUM.map(s => `<td><b>${s[1] === 'pay' ? (x.sum.pay != null ? x.sum.pay.toLocaleString('vi-VN') : '') : x.sum[s[1]]}</b></td>`).join('')}</tr>`).join('')}</table>
     <p class="muted">X đủ công · X/2 nửa công · P phép · O ốm · KL không lương · CT công tác · L lễ · V vắng · ! thiếu check-out</p>`;
   $('#tsCsv').onclick = () => csvDownload('BangCong_' + mo + '.csv', [['Mã NV', 'Họ tên', 'Bộ phận', ...ts.days.map(d => d.d.slice(8)), ...SUM.map(s => s[0])], ...ts.rows.map(x => [x.empId, x.name, x.dept, ...x.cells.map(c => c.c), ...SUM.map(s => x.sum[s[1]])])]);
   $('#tsGs').onclick = async e => { busy(e.target, 1); const x = await call('exportSheet', { month: mo }); busy(e.target, 0);
@@ -495,7 +508,7 @@ async function mEmp() {
   const L = r.list.filter(e => !q || (e.id + ' ' + e.name + ' ' + e.dept).toLowerCase().includes(q));
   MG(`<div class="card"><div class="row"><input id="eQ" placeholder="🔍 Tìm mã, tên, bộ phận…" value="${esc(S.sub.eq || '')}">${ad ? '<button class="btn" id="eNew" style="flex:0 0 auto">＋ Thêm</button>' : ''}</div></div>
    <div class="card">${L.map(e => `<div class="item" ${ad ? `data-e="${e.id}" style="cursor:pointer"` : ''}><div class="t"><b>${esc(e.name)}</b><span class="muted">${esc(e.id)}</span></div>
-   <div class="muted">${ROLE[e.role] || ''} · ${esc(e.dept)} · Ca ${esc(e.shiftId)} ${e.active === 'TRUE' ? '' : '· <b style="color:var(--r)">Đã khóa</b>'} ${e.hasDevice ? '· 📱 đã gắn máy' : '· chưa gắn máy'}</div></div>`).join('') || '<p class="muted">Không có nhân viên.</p>'}</div>`);
+   <div class="muted">${e.title ? esc(e.title) + ' · ' : ''}${ROLE[e.role] || ''} · ${esc(e.dept)} · ${esc(e.empType || '')} · Ca ${esc(e.shiftId)} ${e.active === 'TRUE' ? '' : '· <b style="color:var(--r)">Đã khóa</b>'} ${e.hasDevice ? '· 📱 đã gắn máy' : '· chưa gắn máy'}</div></div>`).join('') || '<p class="muted">Không có nhân viên.</p>'}</div>`);
   $('#eQ').oninput = e => { S.sub.eq = e.target.value; clearTimeout(S.eqT); S.eqT = setTimeout(() => { mEmp().then(() => { const i = $('#eQ'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }); }, 400); };
   if (ad) { $('#eNew').onclick = () => empForm({}); $$('[data-e]').forEach(el => el.onclick = () => empForm(r.list.find(x => x.id === el.dataset.e))); }
 }
@@ -508,13 +521,21 @@ function empForm(e) {
    <label>Ngày bắt đầu tính công</label><input id="fSd" type="date" value="${esc(e.startDate || ymd(now()))}">
    <label>Ngày làm việc trong tuần</label><div class="chk">${[1, 2, 3, 4, 5, 6, 7].map(i => `<label><input type="checkbox" class="fWd" value="${i}" ${wd.includes(String(i)) ? 'checked' : ''}>${['', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'][i]}</label>`).join('')}</div>
    <label>Địa điểm được chấm (không chọn = tất cả)</label><div class="chk">${r.sites.map(s => `<label><input type="checkbox" class="fSt" value="${esc(s.id)}" ${sid.includes(s.id) ? 'checked' : ''}>${esc(s.name)}</label>`).join('') || '<span class="muted">Chưa có địa điểm</span>'}</div>
+   <h3 style="margin:14px 0 0;font-size:14px">Hồ sơ nhân sự</h3>
+   <div class="row"><div><label>Chức danh</label><input id="fTi" value="${esc(e.title || '')}" placeholder="VD: Nhân viên giao nhận"></div><div><label>Loại nhân viên</label><select id="fTy">${['Chính thức', 'Thử việc', 'Thời vụ', 'Cộng tác viên', 'Thực tập'].map(x => `<option ${e.empType === x ? 'selected' : ''}>${x}</option>`).join('')}</select></div></div>
+   <div class="row"><div><label>Ngày sinh</label><input id="fBd" type="date" value="${esc(e.birthday || '')}"></div><div><label>Quản lý trực tiếp</label><select id="fMg"><option value="">—</option>${r.list.filter(x => x.role !== 'NV' && x.id !== e.id).map(x => `<option value="${esc(x.id)}" ${e.managerId === x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></div></div>
+   <div class="row"><div><label>Loại hợp đồng</label><select id="fCt">${['', 'Thử việc', 'Xác định thời hạn 12 tháng', 'Xác định thời hạn 24 tháng', 'Xác định thời hạn 36 tháng', 'Không xác định thời hạn', 'Thời vụ'].map(x => `<option ${e.contractType === x ? 'selected' : ''}>${x}</option>`).join('')}</select></div><div><label>Ngày hết hạn HĐ</label><input id="fCe" type="date" value="${esc(e.contractEnd || '')}"></div></div>
+   ${S.data.me.me.role === 'AD' ? `<label>Lương cơ bản/tháng (VNĐ, để ước tính lương theo công)</label><input id="fSa" type="number" value="${esc(e.salary || '')}">` : ''}
+   <label>Ghi chú</label><input id="fNo" value="${esc(e.note || '')}">
    <div class="row"><div><label>Email (nhận nhắc việc, duyệt đơn)</label><input id="fEm" type="email" value="${esc(e.email || '')}"></div><div><label>Điện thoại</label><input id="fPh" value="${esc(e.phone || '')}"></div></div>
    <label style="display:flex;gap:6px;align-items:center;margin-top:10px"><input type="checkbox" id="fAc" style="width:auto" ${e.active !== 'FALSE' ? 'checked' : ''}> Đang làm việc (bỏ chọn để khóa tài khoản)</label>
    ${isNew ? '<p class="muted">Mật khẩu ban đầu: <b>123456</b> (bắt buộc đổi khi đăng nhập lần đầu).</p>' : `<div class="row" style="margin-top:10px"><button class="btn s sm" id="fRp">🔑 Đặt lại mật khẩu</button><button class="btn s sm" id="fRd" ${e.hasDevice ? '' : 'disabled'}>📱 Gỡ gắn điện thoại</button></div>`}
    <div id="fMsg"></div><div class="acts"><button class="btn s" data-x="close">Hủy</button><button class="btn" id="fGo">Lưu</button></div>`);
   $('#fGo').onclick = async () => {
     const emp = { id: $('#fId').value, name: $('#fNm').value, role: $('#fRl').value, dept: $('#fDp').value, shiftId: $('#fSh').value, leaveQuota: $('#fLq').value, startDate: $('#fSd').value,
-      workDays: $$('.fWd').filter(x => x.checked).map(x => x.value).join(','), siteIds: $$('.fSt').filter(x => x.checked).map(x => x.value).join(','), email: $('#fEm').value, phone: $('#fPh').value, active: $('#fAc').checked };
+      workDays: $$('.fWd').filter(x => x.checked).map(x => x.value).join(','), siteIds: $$('.fSt').filter(x => x.checked).map(x => x.value).join(','), email: $('#fEm').value, phone: $('#fPh').value, active: $('#fAc').checked,
+      title: $('#fTi').value, empType: $('#fTy').value, birthday: $('#fBd').value, managerId: $('#fMg').value, contractType: $('#fCt').value, contractEnd: $('#fCe').value, note: $('#fNo').value };
+    if ($('#fSa')) emp.salary = $('#fSa').value;
     const x = await call('saveEmployee', { emp }); if (!x.ok) return $('#fMsg').innerHTML = `<div class="st er">${esc(x.error)}</div>`;
     closeModal(); toast(x.created ? 'Đã thêm nhân viên (mật khẩu 123456)' : 'Đã lưu', 'ok'); mEmp();
   };
@@ -522,6 +543,21 @@ function empForm(e) {
     $('#fRp').onclick = async () => { const x = await call('resetPw', { id: e.id }); toast(x.ok ? 'Mật khẩu đã đặt lại: 123456' : x.error, x.ok ? 'ok' : 'er'); };
     $('#fRd').onclick = async () => { const x = await call('resetDevice', { id: e.id }); toast(x.ok ? 'Đã gỡ máy. Nhân viên đăng nhập trên máy mới để gắn lại.' : x.error, x.ok ? 'ok' : 'er'); closeModal(); mEmp(); };
   }
+}
+async function mSched() {
+  const [e, sc] = await Promise.all([call('employees'), call('schedule', { from: ymd(now()), to: ymd(new Date(now().getTime() + 45 * 864e5)) })]);
+  if (!e.ok) return MG(`<div class="st er">${esc(e.error)}</div>`);
+  const t = ymd(now()), EM = {}; e.list.forEach(x => EM[x.id] = x.name); const SH = {}; e.shifts.forEach(x => SH[x.id] = x.name);
+  MG(`<div class="card"><h3>🗓 Xếp ca / lịch nghỉ</h3><p class="muted">Đổi ca hoặc cho nghỉ theo ngày cho từng nhân viên (ưu tiên hơn ca mặc định). Chọn "Ca mặc định" để xóa lịch đã xếp.</p>
+    <div class="row"><div><label>Từ ngày</label><input type="date" id="scF" value="${t}"></div><div><label>Đến ngày</label><input type="date" id="scT" value="${t}"></div></div>
+    <label>Ca</label><select id="scS"><option value="DEFAULT">↺ Ca mặc định (xóa lịch)</option><option value="OFF">🏖 Nghỉ (không tính vắng)</option>${e.shifts.map(x => `<option value="${esc(x.id)}">${esc(x.name)} (${x.start}-${x.end})</option>`).join('')}</select>
+    <label>Nhân viên <a href="#" id="scAll" style="font-size:12px">(chọn tất cả)</a></label><div class="chk">${e.list.filter(x => x.active !== 'FALSE').map(x => `<label><input type="checkbox" class="scE" value="${esc(x.id)}">${esc(x.name)}</label>`).join('')}</div>
+    <button class="btn full" id="scGo" style="margin-top:10px">Lưu lịch</button></div>
+   <div class="card"><h3>Lịch đã xếp (45 ngày tới)</h3>${(sc.list || []).sort((a, b) => a.date < b.date ? -1 : 1).map(x => `<div class="item"><div class="t"><span><b>${vnDate(x.date)}</b> · ${esc(EM[x.empId] || x.empId)}</span><span class="pill ${x.shiftId === 'OFF' ? 'CANCELLED' : 'APPROVED'}">${x.shiftId === 'OFF' ? 'Nghỉ' : esc(SH[x.shiftId] || x.shiftId)}</span></div></div>`).join('') || '<p class="muted">Chưa có lịch riêng, mọi người làm theo ca mặc định.</p>'}</div>`);
+  $('#scAll').onclick = ev => { ev.preventDefault(); $$('.scE').forEach(x => x.checked = true); };
+  $('#scGo').onclick = async ev => { const ids = $$('.scE').filter(x => x.checked).map(x => x.value); if (!ids.length) return toast('Chọn nhân viên', 'er');
+    busy(ev.target, 1); const x = await call('saveSchedule', { empIds: ids, from: $('#scF').value, to: $('#scT').value, shiftId: $('#scS').value }); busy(ev.target, 0);
+    toast(x.ok ? 'Đã lưu ' + x.count + ' ngày công' : x.error, x.ok ? 'ok' : 'er'); if (x.ok) mSched(); };
 }
 function mAnn() {
   const ad = S.data.me.me.role === 'AD';
@@ -594,7 +630,8 @@ async function mCfg() {
    <div class="row">${tx('fullDayRatio', 'Tỷ lệ giờ làm tính đủ công (0-1)', 'number')}${tx('offlineMaxHours', 'Hạn đồng bộ ngoại tuyến (giờ)', 'number')}</div>
    <div class="row">${tx('minAppVersion', 'Phiên bản app tối thiểu')}${tx('remindAfterMin', 'Nhắc check-in sau giờ vào ca (phút)', 'number')}</div>
    <label>Kiểm tra Wi-Fi công ty</label><select id="k_wifiMode">${[['OFF', 'Không dùng Wi-Fi (chỉ GPS)'], ['GPS_OR_WIFI', 'GPS HOẶC Wi-Fi công ty'], ['GPS_AND_WIFI', 'GPS VÀ Wi-Fi công ty (chặt nhất)']].map(([v, t]) => `<option value="${v}" ${c.wifiMode === v ? 'selected' : ''}>${t}</option>`).join('')}</select>
-   ${yn('requireApp', 'Chỉ cho chấm công bằng ứng dụng Android (chặn trình duyệt, phát hiện Fake GPS)')}${yn('notifyRejected', 'Báo quản lý khi có lượt chấm công bị từ chối')}
+   ${yn('requireApp', 'Chỉ cho chấm công bằng ứng dụng Android (chặn trình duyệt, phát hiện Fake GPS)')}${yn('notifyRejected', 'Báo quản lý khi có lượt chấm công bị từ chối')}${yn('allowOutsideRequest', 'Cho nhân viên gửi chấm công ngoài vùng để quản lý duyệt')}
+   <div class="row">${tx('standardDays', 'Công chuẩn/tháng (tính lương)', 'number')}${tx('otRate', 'Hệ số làm thêm giờ', 'number')}</div>
    ${yn('requireSelfie', 'Bắt buộc chụp ảnh khuôn mặt khi chấm công')}${yn('bindDevice', 'Mỗi tài khoản chỉ dùng trên 1 điện thoại')}${yn('allowOffline', 'Cho phép chấm công khi mất mạng (tự đồng bộ sau)')}${yn('remindEnabled', 'Gửi email nhắc nhân viên chưa check-in (cần chạy installReminder 1 lần)')}
    <button class="btn full" id="kGo" style="margin-top:12px">Lưu cấu hình</button></div>
    <div class="card muted">Máy chủ: backend ${esc(S.data.me.backend)} · App ${VERSION}. Dữ liệu lưu tại Google Sheet của tài khoản triển khai Apps Script; ảnh xác thực lưu trong thư mục Drive "ChamCong_AnhXacThuc".</div>`);
@@ -615,10 +652,16 @@ function vAcc() {
    <span>Ca làm</span><b>${esc(S.data.me.shift.name)} (${S.data.me.shift.start}-${S.data.me.shift.end})</b><span>Email</span><b>${esc(m.email) || '—'}</b></div></div>
    <div class="card"><button class="btn s full" id="aPw">🔑 Đổi mật khẩu</button>${!isStandalone() ? '<button class="btn o full" data-x="install" style="margin-top:8px">📲 Cài ứng dụng lên điện thoại</button>' : ''}
    ${NATIVE ? `<label style="display:flex;gap:8px;align-items:center;color:var(--t);font-size:14px;margin-top:12px"><input type="checkbox" id="aRem" style="width:auto" ${LS.get('remOn', true) ? 'checked' : ''}> Nhắc giờ vào/ra ca trên điện thoại</label>` : (isAndroid ? '<a class="btn g full" href="download/" style="margin-top:8px;text-decoration:none">⬇ Tải ứng dụng Android (.apk)</a>' : '')}
+   <button class="btn s full" id="aDir" style="margin-top:8px">📒 Danh bạ công ty</button>
    <button class="btn s full" id="aShare" style="margin-top:8px">📤 Gửi link cài app cho đồng nghiệp</button>
    <button class="btn s full" id="aUp" style="margin-top:8px">🔄 Kiểm tra bản cập nhật</button><button class="btn r full" id="aOut" style="margin-top:8px">Đăng xuất</button></div>
    <p class="muted c">Chấm công GPS · giao diện ${VERSION}${NATIVE ? ' · ứng dụng ' + esc(NATIVE.versionName) : ''} · máy chủ ${esc(S.data.me.backend)}<br>Mã thiết bị: ${esc(S.device.slice(0, 10))}</p>`;
   $('#aPw').onclick = () => changePw(false);
+  $('#aDir').onclick = async () => { const r = await call('directory'); if (!r.ok) return toast(r.error, 'er');
+    const draw = q => r.list.filter(x => !q || (x.name + ' ' + x.dept + ' ' + (x.title || '') + ' ' + x.id).toLowerCase().includes(q)).map(x => `<div class="item"><div class="t"><b>${esc(x.name)}</b><span class="muted">${esc(x.id)}</span></div>
+      <div class="muted">${esc(x.title || '')}${x.title ? ' · ' : ''}${esc(x.dept)}</div><div>${x.phone ? `📞 <a href="tel:${esc(x.phone)}">${esc(x.phone)}</a> ` : ''}${x.email ? ` ✉️ ${esc(x.email)}` : ''}</div></div>`).join('') || '<p class="muted">Không tìm thấy</p>';
+    modal(`<h3>📒 Danh bạ (${r.list.length})</h3><input id="dQ" placeholder="🔍 Tìm tên, bộ phận…"><div id="dL">${draw('')}</div><div class="acts"><button class="btn" data-x="close">Đóng</button></div>`);
+    $('#dQ').oninput = e => $('#dL').innerHTML = draw(e.target.value.toLowerCase()); };
   $('#aShare').onclick = () => { const link = location.origin + location.pathname.replace(/[^/]*$/, '') + 'download/', t = 'Cài ứng dụng Chấm công TCL: ' + link;
     if (NATIVE && Native.share) Native.share(t); else if (navigator.share) navigator.share({ text: t }).catch(() => {}); else navigator.clipboard.writeText(t).then(() => toast('Đã chép link: ' + link, 'ok')); };
   if ($('#aRem')) $('#aRem').onchange = e => { LS.set('remOn', e.target.checked); nativeSync(); toast(e.target.checked ? 'Đã bật nhắc giờ ca' : 'Đã tắt nhắc giờ ca'); }; $('#aUp').onclick = () => checkUpdate('manual');
