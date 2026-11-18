@@ -7,7 +7,7 @@
  * Nâng cấp backend: dán code mới > Triển khai > Quản lý triển khai > Sửa (bút chì) > Phiên bản mới.
  * Tài khoản quản trị đầu tiên: ADMIN / admin123 (bắt buộc đổi khi đăng nhập).
  */
-const BACKEND_VERSION = '3.5.0';
+const BACKEND_VERSION = '3.5.1';
 const TZ = 'Asia/Ho_Chi_Minh';
 const T = {
   NV: ['id', 'name', 'password', 'role', 'dept', 'shiftId', 'workDays', 'email', 'phone', 'deviceId', 'leaveQuota', 'siteIds', 'active', 'mustChange', 'startDate', 'title', 'empType', 'birthday', 'contractType', 'contractEnd', 'managerId', 'salary', 'note', 'address', 'emergency', 'allowance', 'insSalary', 'dependents'],
@@ -51,13 +51,13 @@ function sh(k) {
     if (k === 'CFG') Object.keys(DEF).forEach(x => put('CFG', { key: x, value: DEF[x] }, s));
     if (k === 'CA') put('CA', { id: 'HC', name: 'Hành chính', start: '07:30', end: '17:00', breakMin: '90', graceMin: '5' }, s);
     if (k === 'NV') put('NV', { id: 'ADMIN', name: 'Quản trị hệ thống', password: hash('ADMIN', 'admin123'), role: 'AD', dept: 'TCHC', shiftId: 'HC', workDays: '1,2,3,4,5,6', active: 'TRUE', mustChange: 'TRUE', leaveQuota: '12', startDate: today() }, s);
-  } else if (!MEMO['_h' + k]) {
-    MEMO['_h' + k] = 1; const h = s.getRange(1, 1, 1, T[k].length).getDisplayValues()[0];
+  } else if (!MEMO['_h' + k] && !hdrOk(k)) {
+    MEMO['_h' + k] = 1; hdrOk(k, 1); const h = s.getRange(1, 1, 1, T[k].length).getDisplayValues()[0];
     if (h.join('|') !== T[k].join('|')) s.getRange(1, 1, 1, T[k].length).setValues([T[k]]);
   }
   return s;
 }
-const CACHED = { CFG: 1, NV: 1, CA: 1, DD: 1, LE: 1, LC: 1 };
+const CACHED = { CFG: 1, NV: 1, CA: 1, DD: 1, LE: 1, LC: 1, DON: 1 };
 function cacheGet(k) {
   try { const c = CacheService.getScriptCache(), n = +c.get('R_' + k + '_n'); if (!n) return null;
     const parts = c.getAll(Array.from({ length: n }, (_, i) => 'R_' + k + '_' + i)), txt = Array.from({ length: n }, (_, i) => parts['R_' + k + '_' + i]);
@@ -68,6 +68,7 @@ function cachePut(k, v) {
     for (let i = 0; i < n; i++) o['R_' + k + '_' + i] = t.slice(i * 90000, (i + 1) * 90000);
     o['R_' + k + '_n'] = String(n); c.putAll(o, 21600); } catch (e) { }
 }
+function hdrOk(k, set) { try { const c = CacheService.getScriptCache(), key = 'H_' + k + '_' + T[k].length; if (set) c.put(key, '1', 21600); else return !!c.get(key); } catch (e) { return false; } }
 function cacheDrop(k) { try { CacheService.getScriptCache().remove('R_' + k + '_n'); } catch (e) { } }
 function rows(k) {
   if (MEMO[k]) return MEMO[k];
@@ -215,7 +216,9 @@ function login(p, c) {
     if (!e.deviceId) { const l = LockService.getScriptLock(); l.waitLock(15000); try { MEMO = {}; const x = emp(e.id); x.deviceId = dev; upd('NV', x); } finally { l.releaseLock(); } }
     else if (e.deviceId !== dev) return { ok: false, error: 'Tài khoản đã gắn với điện thoại khác. Liên hệ quản trị để đổi thiết bị.' };
   }
-  return { ok: true, token: makeToken(e.id, dev), mustChange: isT(e.mustChange) };
+  const r = { ok: true, token: makeToken(e.id, dev), mustChange: isT(e.mustChange) };
+  try { r.me = me(emp(e.id), cfg()); } catch (x) { }
+  return r;
 }
 function changePw(u, p) {
   if (u.password !== hash(u.id, String(p.old || ''))) return { ok: false, error: 'Mật khẩu hiện tại không đúng' };
@@ -519,7 +522,7 @@ function notifyManagers(u, title, body) {
 }
 function notifs(u, since) {
   const s = sh('TB'), last = s.getLastRow(); if (last < 2) return { ok: true, list: [], now: nowStr() };
-  const st = Math.max(2, last - 300), v = s.getRange(st, 1, last - st + 1, T.TB.length).getDisplayValues();
+  const st = Math.max(2, last - 150), v = s.getRange(st, 1, last - st + 1, T.TB.length).getDisplayValues();
   const mine = to => to === u.id || to === '*' || to === 'DEPT:' + u.dept;
   const list = v.map(r => Object.fromEntries(T.TB.map((h, i) => [h, r[i]]))).filter(n => mine(n.to) && (!since || n.time >= since)).reverse().slice(0, 50);
   return { ok: true, list, now: nowStr() };
