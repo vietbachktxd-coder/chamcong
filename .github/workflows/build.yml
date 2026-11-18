@@ -7,8 +7,6 @@ on:
 
 permissions:
   contents: write
-  pages: write
-  id-token: write
 
 concurrency:
   group: build-deploy
@@ -100,18 +98,9 @@ jobs:
           gh release create "v${{ steps.ver.outputs.vname }}" site/download/ChamCong.apk \
             --title "Chấm công TCL ${{ steps.ver.outputs.vname }}" --notes "${MSG:-Cập nhật}" || true
 
-      - if: steps.key.outputs.ok == 'true'
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: site
-
-  deploy:
-    needs: build
-    if: needs.build.outputs.signed == 'true'
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Đưa lên trang tải (nhánh gh-pages)
+        if: steps.key.outputs.ok == 'true'
+        run: |
+          cd site && touch .nojekyll && git init -q -b gh-pages && git add -A
+          git -c user.name=ci -c user.email=ci@local commit -qm "Trang tải app ${{ steps.ver.outputs.vname }}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" gh-pages
