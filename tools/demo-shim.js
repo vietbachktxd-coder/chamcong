@@ -86,12 +86,13 @@
   const LockService = { getScriptLock: () => noop };
   const MailApp = { sendEmail() { } };
   const ContentService = { createTextOutput: s => ({ setMimeType() { return this; } }), MimeType: { JSON: 'json' } };
+  const CacheService = { getScriptCache: () => ({ get: () => null, getAll: () => ({}), putAll() { }, remove() { } }) };
   const ScriptApp = { getProjectTriggers: () => [], deleteTrigger() { }, newTrigger: () => ({ timeBased: () => ({ everyMinutes: () => ({ create() { } }) }) }) };
 
-  const mod = (function (SpreadsheetApp, PropertiesService, DriveApp, Utilities, LockService, MailApp, ContentService, ScriptApp) {
+  const mod = (function (SpreadsheetApp, PropertiesService, DriveApp, Utilities, LockService, MailApp, ContentService, ScriptApp, CacheService) {
     /*__CODE_GS__*/
     return { api };
-  })(SpreadsheetApp, PropertiesService, DriveApp, Utilities, LockService, MailApp, ContentService, ScriptApp);
+  })(SpreadsheetApp, PropertiesService, DriveApp, Utilities, LockService, MailApp, ContentService, ScriptApp, CacheService);
 
   root.ChamCongDemo = {
     api(p) { let r; try { r = mod.api(JSON.parse(JSON.stringify(p))); } finally { save(KEY, DB); } return JSON.parse(JSON.stringify(r)); },

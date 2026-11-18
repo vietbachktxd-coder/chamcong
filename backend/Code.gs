@@ -7,7 +7,7 @@
  * Nâng cấp backend: dán code mới > Triển khai > Quản lý triển khai > Sửa (bút chì) > Phiên bản mới.
  * Tài khoản quản trị đầu tiên: ADMIN / admin123 (bắt buộc đổi khi đăng nhập).
  */
-const BACKEND_VERSION = '3.4.0';
+const BACKEND_VERSION = '3.5.0';
 const TZ = 'Asia/Ho_Chi_Minh';
 const T = {
   NV: ['id', 'name', 'password', 'role', 'dept', 'shiftId', 'workDays', 'email', 'phone', 'deviceId', 'leaveQuota', 'siteIds', 'active', 'mustChange', 'startDate', 'title', 'empType', 'birthday', 'contractType', 'contractEnd', 'managerId', 'salary', 'note', 'address', 'emergency', 'allowance', 'insSalary', 'dependents'],
@@ -23,7 +23,7 @@ const T = {
 };
 const NAME = { NV: 'NhanVien', CA: 'CaLam', DD: 'DiaDiem', CC: 'ChamCong', DON: 'DonTu', LE: 'NgayLe', CFG: 'CauHinh', TB: 'ThongBao', LC: 'LichCa', DG: 'DanhGiaKH' };
 const DEF = {
-  company: 'Công ty CP ĐLGNVT XD Tân Cảng', maxAccuracy: '100', requireSelfie: 'TRUE', bindDevice: 'TRUE',
+  company: 'Công ty CP ĐLGNVT XD Tân Cảng', maxAccuracy: '100', requireSelfie: 'TRUE', bindDevice: 'FALSE', unit: '', taxCode: '', orgPhone: '', orgAddress: '',
   allowOffline: 'TRUE', offlineMaxHours: '24', minAppVersion: '3.0.0', wifiMode: 'OFF', requireApp: 'FALSE', notifyRejected: 'TRUE', allowOutsideRequest: 'TRUE', standardDays: '26', otRate: '1.5',
   selfRegister: 'TRUE', regApproval: 'TRUE', empPrefix: 'TCL', leaveL2Days: '3', leaveNoticeDays: '3',
   otWeekday: '1.5', otWeekend: '2', otHoliday: '3', otMonthCap: '40', otWeekCap: '12',
@@ -57,23 +57,38 @@ function sh(k) {
   }
   return s;
 }
+const CACHED = { CFG: 1, NV: 1, CA: 1, DD: 1, LE: 1, LC: 1 };
+function cacheGet(k) {
+  try { const c = CacheService.getScriptCache(), n = +c.get('R_' + k + '_n'); if (!n) return null;
+    const parts = c.getAll(Array.from({ length: n }, (_, i) => 'R_' + k + '_' + i)), txt = Array.from({ length: n }, (_, i) => parts['R_' + k + '_' + i]);
+    return txt.some(x => x == null) ? null : JSON.parse(txt.join('')); } catch (e) { return null; }
+}
+function cachePut(k, v) {
+  try { const c = CacheService.getScriptCache(), t = JSON.stringify(v), o = {}, n = Math.ceil(t.length / 90000) || 1;
+    for (let i = 0; i < n; i++) o['R_' + k + '_' + i] = t.slice(i * 90000, (i + 1) * 90000);
+    o['R_' + k + '_n'] = String(n); c.putAll(o, 21600); } catch (e) { }
+}
+function cacheDrop(k) { try { CacheService.getScriptCache().remove('R_' + k + '_n'); } catch (e) { } }
 function rows(k) {
   if (MEMO[k]) return MEMO[k];
+  if (CACHED[k]) { const hit = cacheGet(k); if (hit) return (MEMO[k] = hit); }
   const v = sh(k).getDataRange().getDisplayValues(); v.shift();
-  return (MEMO[k] = v.map((r, i) => { const o = { _r: i + 2 }; T[k].forEach((h, j) => o[h] = r[j]); return o; }));
+  MEMO[k] = v.map((r, i) => { const o = { _r: i + 2 }; T[k].forEach((h, j) => o[h] = r[j]); return o; });
+  if (CACHED[k]) cachePut(k, MEMO[k]);
+  return MEMO[k];
 }
 function put(k, o, s) {
   s = s || sh(k);
   const r = s.getLastRow() + 1, vals = T[k].map(h => o[h] == null ? '' : String(o[h]));
   s.getRange(r, 1, 1, vals.length).setNumberFormat('@').setValues([vals]);
-  delete MEMO[k]; return r;
+  delete MEMO[k]; if (CACHED[k]) cacheDrop(k); return r;
 }
 function upd(k, o) {
   const vals = T[k].map(h => o[h] == null ? '' : String(o[h]));
   sh(k).getRange(o._r, 1, 1, vals.length).setNumberFormat('@').setValues([vals]);
-  delete MEMO[k];
+  delete MEMO[k]; if (CACHED[k]) cacheDrop(k);
 }
-function del(k, r) { sh(k).deleteRow(r); delete MEMO[k]; }
+function del(k, r) { sh(k).deleteRow(r); delete MEMO[k]; if (CACHED[k]) cacheDrop(k); }
 function tailLogs(n) {
   const s = sh('CC'), last = s.getLastRow(); if (last < 2) return [];
   const st = Math.max(2, last - n + 1);
@@ -208,17 +223,17 @@ function changePw(u, p) {
   const e = emp(u.id); e.password = hash(e.id, p.pw); e.mustChange = 'FALSE'; upd('NV', e); return { ok: true };
 }
 function me(u, c) {
-  const t = today(), logs = tailLogs(3000).filter(l => l.empId === u.id && l.date === t);
-  const pub = {}; ['company', 'maxAccuracy', 'requireSelfie', 'allowOffline', 'offlineMaxHours', 'minAppVersion', 'wifiMode', 'requireApp', 'leaveL2Days', 'leaveNoticeDays', 'allowOutsideRequest'].forEach(k => pub[k] = c[k]);
+  const t = today(), logs = tailLogs(400).filter(l => l.empId === u.id && l.date === t);
+  const pub = {}; ['company', 'maxAccuracy', 'requireSelfie', 'allowOffline', 'offlineMaxHours', 'minAppVersion', 'wifiMode', 'requireApp', 'leaveL2Days', 'leaveNoticeDays', 'allowOutsideRequest', 'unit'].forEach(k => pub[k] = c[k]);
   return { ok: true, me: pubEmp(u), shift: shiftOf(u), sites: sitesOf(u), cfg: pub, today: logs, serverTime: nowStr(), backend: BACKEND_VERSION,
     balance: leaveBalance(u, c), pending: (u.role === 'QL' || u.role === 'AD') ? pendingFor(u).length + pendingPunches(u).length : 0,
-    holidays: rows('LE').filter(h => h.date >= t).slice(0, 10), reqTypes: REQ };
+    holidays: rows('LE').filter(h => h.date >= t).slice(0, 10), reqTypes: REQ, notifs: notifs(u, '').list.slice(0, 20) };
 }
 
 /* ============================ CHẤM CÔNG ============================ */
 function punch(u, p, c, dev) {
   if (p.type !== 'IN' && p.type !== 'OUT') return { ok: false, error: 'Loại chấm công không hợp lệ' };
-  const cid = String(p.cid || ''), tail = tailLogs(3000);
+  const cid = String(p.cid || ''), tail = tailLogs(800);
   if (cid) { const dup = tail.find(l => l.id === cid); if (dup) return { ok: dup.valid === 'TRUE', dup: true, time: dup.time, site: dup.siteName, error: dup.note }; }
   let time = nowStr(), offline = false;
   if (p.offline && p.clientTime) {
@@ -504,7 +519,7 @@ function notifyManagers(u, title, body) {
 }
 function notifs(u, since) {
   const s = sh('TB'), last = s.getLastRow(); if (last < 2) return { ok: true, list: [], now: nowStr() };
-  const st = Math.max(2, last - 1500), v = s.getRange(st, 1, last - st + 1, T.TB.length).getDisplayValues();
+  const st = Math.max(2, last - 300), v = s.getRange(st, 1, last - st + 1, T.TB.length).getDisplayValues();
   const mine = to => to === u.id || to === '*' || to === 'DEPT:' + u.dept;
   const list = v.map(r => Object.fromEntries(T.TB.map((h, i) => [h, r[i]]))).filter(n => mine(n.to) && (!since || n.time >= since)).reverse().slice(0, 50);
   return { ok: true, list, now: nowStr() };
@@ -545,7 +560,7 @@ function saveSchedule(u, p) {
   if (sid && sid !== 'DEFAULT') ids.forEach(i => days.forEach(d => keep.push([d, i, sid, u.id])));
   s.getRange(2, 1, Math.max(1, v.length), head.length).clearContent();
   if (keep.length) s.getRange(2, 1, keep.length, head.length).setNumberFormat('@').setValues(keep);
-  delete MEMO.LC; return { ok: true, count: ids.length * days.length };
+  delete MEMO.LC; cacheDrop('LC'); return { ok: true, count: ids.length * days.length };
 }
 function hrAlerts(emps, date) {
   const out = [], in30 = addDays(date, 30), mm = date.slice(5, 7);
