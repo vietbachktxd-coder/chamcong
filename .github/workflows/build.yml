@@ -48,10 +48,17 @@ jobs:
           echo "ok=true" >> $GITHUB_OUTPUT
           openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in android/app/release.keystore.enc -out android/app/release.keystore -pass env:KS_PASS
 
-      - name: Build thử (chưa có khóa ký)
+      - name: Build chưa ký (khi chưa có KS_PASS) -> nhánh apk-unsigned
         if: steps.key.outputs.ok != 'true'
-        working-directory: android
-        run: gradle --no-daemon assembleDebug -PWEB_URL="${{ steps.ver.outputs.weburl }}"
+        run: |
+          cd android
+          gradle --no-daemon assembleRelease -PWEB_URL="${{ steps.ver.outputs.weburl }}" -PVCODE="${{ steps.ver.outputs.vcode }}" -PVNAME="${{ steps.ver.outputs.vname }}"
+          cd ..
+          mkdir -p /tmp/out && cp android/app/build/outputs/apk/release/app-release-unsigned.apk /tmp/out/
+          echo '{"versionCode": ${{ steps.ver.outputs.vcode }}, "versionName": "${{ steps.ver.outputs.vname }}"}' > /tmp/out/version.json
+          cd /tmp/out && git init -q -b apk-unsigned && git add -A
+          git -c user.name=ci -c user.email=ci@local commit -qm "unsigned ${{ steps.ver.outputs.vname }}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" apk-unsigned
 
       - name: Build APK
         if: steps.key.outputs.ok == 'true'
