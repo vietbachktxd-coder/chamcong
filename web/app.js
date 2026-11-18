@@ -285,7 +285,7 @@ function vHome() {
   $('#view').innerHTML = `<div class="hero"><div class="clock" id="clock">--:--:--</div><div class="date">${WD[n.getDay()]}, ${vnDate(ymd(n))}${hol ? ' · 🎉 ' + esc(hol.name) : ''}</div>
     <div class="shift"><span>Ca: <b>${esc(sh.name || '')}</b></span><span>Vào ${esc(sh.start || '')} · Ra ${esc(sh.end || '')}</span></div></div>
     <div class="card"><div id="geo" class="st in">Đang xác định vị trí…</div>
-      <div class="punch"><button class="btn g ${next === 'IN' ? '' : 'dim'}" id="pIn">▶ CHECK-IN<small>Vào ca</small></button><button class="btn r ${next === 'OUT' ? '' : 'dim'}" id="pOut">■ CHECK-OUT<small>Ra ca</small></button></div>
+      <div class="punch"><button class="btn g ${next === 'IN' ? '' : 'dim'}" id="pIn">▶ VÀO CA<small>Check-in</small></button><button class="btn r ${next === 'OUT' ? '' : 'dim'}" id="pOut">■ RA CA<small>Check-out</small></button></div>
       <div id="pMsg"></div><div class="map" id="hmap"></div></div>
     <div class="card"><h3>Hôm nay</h3>${logs.length || pend.length ? `<ul class="tl">${logs.map(l => `<li><span class="dot ${l.type === 'IN' ? 'in' : 'out'}"></span><b>${l.time.slice(11, 16)}</b><span>${l.type === 'IN' ? 'Check-in' : 'Check-out'} · ${esc(l.siteName)}${l.source === 'CT' ? ' · Công tác' : ''}${l.offline === 'TRUE' ? ' · ngoại tuyến' : ''}</span></li>`).join('')}
       ${pend.map(p => `<li><span class="dot ${p.type === 'IN' ? 'in' : 'out'}"></span><b>${new Date(p.clientTime).toTimeString().slice(0, 5)}</b><span>${p.type === 'IN' ? 'Check-in' : 'Check-out'} · ⏳ chờ đồng bộ</span></li>`).join('')}</ul>` : '<p class="muted">Chưa chấm công hôm nay.</p>'}</div>

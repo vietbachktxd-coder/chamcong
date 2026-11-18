@@ -60,3 +60,7 @@ table.ts th.we{background:#fff1f2}td.cX{background:#ecfdf5;color:#065f46}td.cV{b
 .banner{background:var(--y2);color:#78350f;padding:9px 14px;font-size:13px;display:flex;gap:8px;align-items:center}.banner .btn{margin-left:auto}
 .spin{display:inline-block;width:16px;height:16px;border:2px solid #fff8;border-top-color:#fff;border-radius:50%;animation:sp .8s linear infinite}@keyframes sp{to{transform:rotate(360deg)}}
 .kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:14px}.kv span{color:var(--m)}
+
+.punch .btn{white-space:nowrap;font-size:clamp(14px,4.6vw,17px);padding:16px 4px}
+.hero .shift{flex-wrap:wrap;gap:4px}
+@media (max-width:360px){nav.bottom button{font-size:10px}}
